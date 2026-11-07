@@ -67,6 +67,34 @@ export function PrimaryButton({
   );
 }
 
+export function SecondaryButton({
+  title,
+  onPress,
+  icon,
+  disabled = false,
+  loading = false,
+  style,
+}: {
+  title: string;
+  onPress: () => void;
+  icon?: keyof typeof Feather.glyphMap;
+  disabled?: boolean;
+  loading?: boolean;
+  style?: ViewStyle;
+}) {
+  return (
+    <PrimaryButton
+      title={title}
+      onPress={onPress}
+      icon={icon}
+      variant="outline"
+      disabled={disabled}
+      loading={loading}
+      style={style}
+    />
+  );
+}
+
 export function SectionCard({
   children,
   style,

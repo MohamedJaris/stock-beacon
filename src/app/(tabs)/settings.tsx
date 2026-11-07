@@ -338,15 +338,15 @@ export default function SettingsScreen() {
                 style={[
                   styles.previewBox,
                   {
-                    backgroundColor: validationPreview.valid
+                    backgroundColor: validationPreview.isValid
                       ? palette.success50
                       : palette.danger50,
                   },
                 ]}
               >
                 <Text style={{ fontWeight: '700', color: palette.slate900 }}>
-                  {validationPreview.valid
-                    ? `Valid Backup (${validationPreview.productCount} products, ${validationPreview.stockEventCount} entries)`
+                  {validationPreview.isValid
+                    ? `Valid Backup (${validationPreview.summary?.productsCount ?? 0} products, ${validationPreview.summary?.stockEventsCount ?? 0} entries)`
                     : `Invalid File: ${validationPreview.error}`}
                 </Text>
               </View>
@@ -358,7 +358,7 @@ export default function SettingsScreen() {
                 onPress={() => setShowRestoreModal(false)}
                 style={{ flex: 1 }}
               />
-              {validationPreview?.valid ? (
+              {validationPreview?.isValid ? (
                 <PrimaryButton
                   title="Restore Now"
                   variant="danger"
