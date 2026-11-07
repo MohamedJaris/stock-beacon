@@ -32,7 +32,8 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.VIBRATE",
-        "android.permission.RECEIVE_BOOT_COMPLETED"
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -65,7 +66,14 @@
       "typedRoutes": false
     },
     "extra": {
-      "privacyPolicySummary": "StockBeacon operates 100% offline. All business profiles, product catalogs, and stock ledgers are stored locally on your device."
+      "privacyPolicySummary": "StockBeacon operates 100% offline. All business profiles, product catalogs, and stock ledgers are stored locally on your device.",
+      "router": {
+        "origin": false,
+        "root": "./src/app"
+      },
+      "eas": {
+        "projectId": "1067b8b3-1b97-484f-b820-1aecf162d205"
+      }
     }
   }
 }

@@ -16,15 +16,38 @@ export function setDatabaseAdapter(adapter: IDatabaseAdapter | null): void {
 const WEB_STORAGE_KEY = 'stock_beacon_web_sqlite_v1';
 
 /**
+ * Loads sql.js in the browser on demand without bundling Node-targeted sql-wasm.js into Metro.
+ */
+async function loadBrowserSqlJs(): Promise<any> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    throw new Error('Browser environment required for web SQLite adapter.');
+  }
+  const win = window as unknown as { initSqlJs?: (cfg: any) => Promise<any> };
+  if (!win.initSqlJs) {
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://sql.js.org/dist/sql-wasm.js';
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () =>
+        reject(new Error('Failed to load sql-wasm.js in browser'));
+      document.head.appendChild(script);
+    });
+  }
+  if (!win.initSqlJs) {
+    throw new Error('initSqlJs not available on window.');
+  }
+  return win.initSqlJs({
+    locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
+  });
+}
+
+/**
  * Creates a persistent SQLite adapter for Web browsers using sql.js + localStorage
  * so `Press w | open web` in `expo start` works out-of-the-box alongside Android/iOS.
  */
 async function createWebSqlJsAdapter(): Promise<IDatabaseAdapter> {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const initSqlJs = require('sql.js');
-  const SQL = await initSqlJs({
-    locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
-  });
+  const SQL = await loadBrowserSqlJs();
 
   let initialBytes: Uint8Array | undefined;
   try {
