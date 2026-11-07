@@ -1,12 +1,10 @@
 import {
   EmptyStateView,
   PrimaryButton,
+  SecondaryButton,
   SectionCard,
 } from '@/components/common/AppComponents';
-import {
-  ProvenanceBadge,
-  StockStatusBadge,
-} from '@/components/inventory/StatusBadge';
+import { StockStatusBadge } from '@/components/inventory/StatusBadge';
 import { formatDisplayDate, getTodayInTimezone } from '@/core/utils/dateUtils';
 import { formatQuantity } from '@/core/utils/quantityMath';
 import { getDatabase } from '@/data/database/DatabaseConnection';
@@ -15,14 +13,11 @@ import {
   StockEventWithDetails,
   SqliteInventoryRepository,
 } from '@/data/repositories/SqliteInventoryRepository';
-import { ProductThresholdHistory } from '@/domain/entities';
 import { useAppStore } from '@/stores/useAppStore';
 import { palette, radius, spacing } from '@/theme';
-import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -41,31 +36,16 @@ export default function ProductDetailScreen() {
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const getProductDetail = useAppStore((s) => s.getProductDetail);
   const updateMinimumThreshold = useAppStore((s) => s.updateMinimumThreshold);
-  const recordOpeningStock = useAppStore((s) => s.recordOpeningStock);
   const setProductArchived = useAppStore((s) => s.setProductArchived);
   const inventoryItems = useAppStore((s) => s.inventoryItems);
 
   const [detail, setDetail] = useState<ProductDetailBundle | null>(null);
   const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
   const [ledgerEvents, setLedgerEvents] = useState<StockEventWithDetails[]>([]);
-  const [thresholdHistory, setThresholdHistory] = useState<
-    ProductThresholdHistory[]
-  >([]);
 
   // Threshold update modal
   const [showThresholdModal, setShowThresholdModal] = useState(false);
   const [newThresholdVal, setNewThresholdVal] = useState('');
-  const [thresholdDate, setThresholdDate] = useState(
-    getTodayInTimezone(profile?.timezone || 'Asia/Kolkata')
-  );
-  const [thresholdReason, setThresholdReason] = useState('');
-
-  // Opening baseline modal
-  const [showOpeningModal, setShowOpeningModal] = useState(false);
-  const [openingVal, setOpeningVal] = useState('0');
-  const [openingDate, setOpeningDate] = useState(
-    getTodayInTimezone(profile?.timezone || 'Asia/Kolkata')
-  );
 
   const loadData = useCallback(async () => {
     if (!id || !profile) return;
@@ -81,16 +61,12 @@ export default function ProductDetailScreen() {
 
       const db = await getDatabase();
       const invRepo = new SqliteInventoryRepository(db);
-      const [events, thHist] = await Promise.all([
-        invRepo.listStockEvents({
-          workspaceId: profile.id,
-          itemKey: targetKey,
-          limit: 100,
-        }),
-        invRepo.getItemThresholdHistory(profile.id, targetKey),
-      ]);
+      const events = await invRepo.listStockEvents({
+        workspaceId: profile.id,
+        itemKey: targetKey,
+        limit: 50,
+      });
       setLedgerEvents(events);
-      setThresholdHistory(thHist);
     }
   }, [id, profile, getProductDetail, selectedItemKey]);
 
@@ -103,8 +79,8 @@ export default function ProductDetailScreen() {
       <View style={{ flex: 1, padding: spacing.lg }}>
         <EmptyStateView
           icon="package"
-          title="Loading Product Details..."
-          message="Fetching product ledger and historical threshold records."
+          title="Loading..."
+          message="Loading product details."
         />
       </View>
     );
@@ -121,25 +97,10 @@ export default function ProductDetailScreen() {
       productId: activeItem.productId,
       variantId: activeItem.variantId,
       newThreshold: val,
-      effectiveDate: thresholdDate,
-      reason: thresholdReason.trim() || 'Threshold updated',
+      effectiveDate: getTodayInTimezone(profile?.timezone || 'Asia/Kolkata'),
+      reason: 'Threshold updated',
     });
     setShowThresholdModal(false);
-    await loadData();
-  };
-
-  const handleSaveOpeningBaseline = async () => {
-    const val = Number(openingVal);
-    if (Number.isNaN(val) || val < 0) return;
-    await recordOpeningStock({
-      itemKey: activeItem.itemKey,
-      productId: activeItem.productId,
-      variantId: activeItem.variantId,
-      quantity: val,
-      eventDate: openingDate,
-      notes: 'Initial baseline recorded from product detail screen',
-    });
-    setShowOpeningModal(false);
     await loadData();
   };
 
@@ -155,34 +116,20 @@ export default function ProductDetailScreen() {
       contentContainerStyle={styles.scrollContent}
     >
       <SectionCard style={styles.section}>
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.catLabel}>
-              {detail.categoryName} • Unit: {detail.unit.name} (
-              {detail.unit.symbol})
-            </Text>
-            <Text style={styles.productName}>{detail.product.name}</Text>
-            {detail.product.description ? (
-              <Text style={styles.descText}>{detail.product.description}</Text>
-            ) : null}
-          </View>
-          {detail.product.isArchived ? (
-            <View style={styles.archivedBadge}>
-              <Text style={styles.archivedText}>ARCHIVED</Text>
-            </View>
-          ) : null}
-        </View>
+        <Text style={styles.catLabel}>{detail.categoryName}</Text>
+        <Text style={styles.productName}>{detail.product.name}</Text>
+        {detail.product.description ? (
+          <Text style={styles.descText}>{detail.product.description}</Text>
+        ) : null}
 
-        {/* Variant selector if multi-variant product */}
+        {/* Size / Type selector if multi-variant product */}
         {detail.items.length > 1 ? (
           <View style={{ marginTop: spacing.md }}>
-            <Text style={styles.subHeader}>
-              Select Variant ({detail.items.length} variants)
-            </Text>
+            <Text style={styles.subHeader}>Sizes / Types</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: spacing.xs, marginTop: 6 }}
+              contentContainerStyle={{ gap: 6, marginTop: 6 }}
             >
               {detail.items.map((vItem) => {
                 const selected = vItem.itemKey === activeItem.itemKey;
@@ -212,11 +159,11 @@ export default function ProductDetailScreen() {
           </View>
         ) : null}
 
-        {/* Active Item Stock Summary Box */}
+        {/* Stock Summary Box */}
         <View style={styles.stockBox}>
           <View style={styles.stockBoxRow}>
             <View>
-              <Text style={styles.stockBoxLabel}>Recorded Balance</Text>
+              <Text style={styles.stockBoxLabel}>Current Stock</Text>
               <Text style={styles.stockBoxQty}>
                 {formatQuantity(
                   activeItem.recordedQuantity,
@@ -227,65 +174,34 @@ export default function ProductDetailScreen() {
             <StockStatusBadge status={activeItem.stockStatus} />
           </View>
 
-          <View style={[styles.stockBoxRow, { marginTop: spacing.sm }]}>
-            <ProvenanceBadge provenance={activeItem.quantityProvenance} />
-            <Text style={styles.metaText}>
-              Last Physical Count:{' '}
-              {formatDisplayDate(
-                activeItem.lastPhysicalCountDate,
-                profile?.dateFormat
-              )}
-            </Text>
-          </View>
-
           <View style={styles.divider} />
 
           <View style={styles.stockBoxRow}>
-            <View>
-              <Text style={styles.metaText}>
-                SKU: <Text style={styles.bold}>{activeItem.sku}</Text>
+            <Text style={styles.metaText}>
+              Min Stock Alert:{' '}
+              <Text style={styles.bold}>
+                {formatQuantity(
+                  activeItem.minStockThreshold,
+                  activeItem.unitSymbol
+                )}
               </Text>
-              {activeItem.barcode ? (
-                <Text style={styles.metaText}>
-                  Barcode: <Text style={styles.bold}>{activeItem.barcode}</Text>
-                </Text>
-              ) : null}
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.metaText}>
-                Min Threshold:{' '}
-                <Text style={styles.bold}>
-                  {formatQuantity(
-                    activeItem.minStockThreshold,
-                    activeItem.unitSymbol
-                  )}
-                </Text>
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setNewThresholdVal(String(activeItem.minStockThreshold));
-                  setShowThresholdModal(true);
-                }}
-              >
-                <Text style={styles.linkText}>Change Threshold</Text>
-              </TouchableOpacity>
-            </View>
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setNewThresholdVal(String(activeItem.minStockThreshold));
+                setShowThresholdModal(true);
+              }}
+            >
+              <Text style={styles.linkText}>Edit Minimum</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Contextual Actions */}
+        {/* 2 Primary Actions */}
         <View style={styles.actionsGrid}>
-          {activeItem.stockStatus === 'UNKNOWN' ? (
-            <PrimaryButton
-              title="Set Opening Baseline"
-              icon="flag"
-              onPress={() => setShowOpeningModal(true)}
-              style={{ flex: 1 }}
-            />
-          ) : null}
           <PrimaryButton
-            title="+ Stock Inward"
-            icon="arrow-down-left"
+            title="Add Stock"
+            icon="plus"
             onPress={() =>
               router.push({
                 pathname: '/(tabs)/stock',
@@ -294,9 +210,8 @@ export default function ProductDetailScreen() {
             }
             style={{ flex: 1 }}
           />
-          <PrimaryButton
-            title="Physical Count"
-            variant="secondary"
+          <SecondaryButton
+            title="Update Count"
             icon="check-square"
             onPress={() =>
               router.push({
@@ -309,122 +224,67 @@ export default function ProductDetailScreen() {
         </View>
       </SectionCard>
 
-      {/* Threshold History Card */}
+      {/* Stock History */}
       <SectionCard style={styles.section}>
         <Text style={styles.sectionTitle}>
-          Historical Minimum Threshold Timeline
-        </Text>
-        <Text style={styles.subText}>
-          Past historical reports preserve the threshold that applied on each calendar date.
-        </Text>
-        <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
-          {thresholdHistory.map((th) => (
-            <View key={th.id} style={styles.historyRow}>
-              <Text style={styles.historyDate}>
-                Effective from{' '}
-                {formatDisplayDate(th.effectiveFromDate, profile?.dateFormat)}
-              </Text>
-              <Text style={styles.historyVal}>
-                Min: {formatQuantity(th.minStockThreshold, activeItem.unitSymbol)}
-              </Text>
-            </View>
-          ))}
-        </View>
-      </SectionCard>
-
-      {/* Immutable Stock Event Ledger */}
-      <SectionCard style={styles.section}>
-        <Text style={styles.sectionTitle}>
-          Immutable Stock Ledger ({ledgerEvents.length})
+          Stock History ({ledgerEvents.length})
         </Text>
         {ledgerEvents.length === 0 ? (
           <Text style={[styles.subText, { marginTop: spacing.sm }]}>
-            No stock events recorded for this item yet.
+            No stock entries yet.
           </Text>
         ) : (
-          <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+          <View style={{ gap: 8, marginTop: spacing.sm }}>
             {ledgerEvents.map((ev) => (
               <View key={ev.id} style={styles.ledgerCard}>
                 <View style={styles.stockBoxRow}>
-                  <Text style={styles.ledgerType}>{ev.eventType}</Text>
+                  <Text style={styles.ledgerType}>
+                    {ev.eventType === 'STOCK_INWARD'
+                      ? 'Stock Inward'
+                      : ev.eventType === 'PHYSICAL_COUNT'
+                      ? 'Count Updated'
+                      : ev.eventType === 'OPENING_STOCK'
+                      ? 'Opening Stock'
+                      : 'Adjusted'}
+                  </Text>
                   <Text style={styles.ledgerDate}>
                     {formatDisplayDate(ev.eventDate, profile?.dateFormat)}
                   </Text>
                 </View>
                 <View style={[styles.stockBoxRow, { marginTop: 4 }]}>
                   <Text style={styles.metaText}>
-                    {ev.eventType === 'PHYSICAL_COUNT'
-                      ? `Observed Count: ${formatQuantity(
-                          ev.quantity,
-                          ev.unitSymbol
-                        )}${
-                          ev.varianceQuantity !== null
-                            ? ` (Count Variance: ${
-                                ev.varianceQuantity > 0 ? '+' : ''
-                              }${formatQuantity(
-                                ev.varianceQuantity,
-                                ev.unitSymbol
-                              )})`
-                            : ''
-                        }`
-                      : ev.eventType === 'STOCK_INWARD'
-                      ? `Received: +${formatQuantity(
-                          ev.quantity,
-                          ev.unitSymbol
-                        )}`
-                      : `Quantity: ${formatQuantity(
-                          ev.quantity,
-                          ev.unitSymbol
-                        )}`}
+                    {ev.eventType === 'STOCK_INWARD'
+                      ? `+${formatQuantity(ev.quantity, ev.unitSymbol)}`
+                      : formatQuantity(ev.quantity, ev.unitSymbol)}
                   </Text>
                   <Text style={styles.bold}>
                     Bal: {formatQuantity(ev.resultingBalance, ev.unitSymbol)}
                   </Text>
                 </View>
-                {ev.reason || ev.referenceNumber || ev.notes ? (
-                  <Text style={styles.noteText}>
-                    {[ev.referenceNumber, ev.reason, ev.notes]
-                      .filter(Boolean)
-                      .join(' • ')}
-                  </Text>
-                ) : null}
               </View>
             ))}
           </View>
         )}
       </SectionCard>
 
-      {/* Archive / Restore Product (Preserves all history) */}
-      <SectionCard style={styles.section}>
-        <Text style={styles.sectionTitle}>Product Lifecycle</Text>
-        <Text style={styles.subText}>
-          Archiving hides the product from active daily entry lists while preserving 100% of its historical stock ledger and past reports.
+      <TouchableOpacity
+        style={styles.archiveBtn}
+        onPress={handleToggleArchive}
+      >
+        <Text style={styles.archiveBtnText}>
+          {detail.product.isArchived
+            ? 'Restore Product to Active List'
+            : 'Archive Product'}
         </Text>
-        <PrimaryButton
-          title={
-            detail.product.isArchived
-              ? 'Restore Product to Active Catalog'
-              : 'Archive Product (Keep History)'
-          }
-          variant={detail.product.isArchived ? 'primary' : 'outline'}
-          icon="archive"
-          onPress={handleToggleArchive}
-          style={{ marginTop: spacing.md }}
-        />
-      </SectionCard>
+      </TouchableOpacity>
 
-      {/* Update Threshold Modal */}
-      <Modal visible={showThresholdModal} transparent animationType="slide">
+      {/* Edit Minimum Modal */}
+      <Modal visible={showThresholdModal} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.sectionTitle}>
-              Update Minimum Stock Threshold
-            </Text>
-            <Text style={styles.subText}>
-              Historical reports prior to the effective date will continue to use the previous threshold.
-            </Text>
+            <Text style={styles.sectionTitle}>Minimum Stock Alert</Text>
             <Text style={styles.label}>
-              New Minimum Threshold ({activeItem.unitSymbol})
+              Minimum Quantity ({activeItem.unitSymbol})
             </Text>
             <TextInput
               style={styles.input}
@@ -432,66 +292,15 @@ export default function ProductDetailScreen() {
               value={newThresholdVal}
               onChangeText={setNewThresholdVal}
             />
-            <Text style={styles.label}>Effective Date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={thresholdDate}
-              onChangeText={setThresholdDate}
-            />
-            <Text style={styles.label}>Reason (Optional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., Seasonal demand increase"
-              value={thresholdReason}
-              onChangeText={setThresholdReason}
-            />
             <View style={styles.modalActions}>
-              <PrimaryButton
+              <SecondaryButton
                 title="Cancel"
-                variant="outline"
                 onPress={() => setShowThresholdModal(false)}
                 style={{ flex: 1 }}
               />
               <PrimaryButton
-                title="Save Threshold"
+                title="Save"
                 onPress={handleSaveThreshold}
-                style={{ flex: 1 }}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Set Opening Baseline Modal */}
-      <Modal visible={showOpeningModal} transparent animationType="slide">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.sectionTitle}>Establish Opening Stock</Text>
-            <Text style={styles.label}>
-              Opening Quantity ({activeItem.unitSymbol})
-            </Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="decimal-pad"
-              value={openingVal}
-              onChangeText={setOpeningVal}
-            />
-            <Text style={styles.label}>Baseline Date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={openingDate}
-              onChangeText={setOpeningDate}
-            />
-            <View style={styles.modalActions}>
-              <PrimaryButton
-                title="Cancel"
-                variant="outline"
-                onPress={() => setShowOpeningModal(false)}
-                style={{ flex: 1 }}
-              />
-              <PrimaryButton
-                title="Save Baseline"
-                onPress={handleSaveOpeningBaseline}
                 style={{ flex: 1 }}
               />
             </View>
@@ -508,195 +317,162 @@ function getStyles() {
       flex: 1,
       backgroundColor: palette.slate50,
     },
-  scrollContent: {
-    padding: spacing.lg,
-    paddingBottom: 40,
-  },
-  section: {
-    marginBottom: spacing.lg,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  catLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: palette.primary600,
-    textTransform: 'uppercase',
-  },
-  productName: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: palette.slate900,
-    marginTop: 2,
-  },
-  descText: {
-    fontSize: 13,
-    color: palette.slate600,
-    marginTop: 4,
-  },
-  archivedBadge: {
-    backgroundColor: palette.warning100,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
-  },
-  archivedText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: palette.warning700,
-  },
-  subHeader: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: palette.slate700,
-  },
-  variantChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: palette.slate300,
-    backgroundColor: palette.white,
-  },
-  variantChipActive: {
-    backgroundColor: palette.navy900,
-    borderColor: palette.navy900,
-  },
-  variantChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: palette.slate700,
-  },
-  variantChipTextActive: {
-    color: palette.white,
-  },
-  stockBox: {
-    marginTop: spacing.md,
-    backgroundColor: palette.slate50,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: palette.slate200,
-  },
-  stockBoxRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  stockBoxLabel: {
-    fontSize: 12,
-    color: palette.slate500,
-    fontWeight: '600',
-  },
-  stockBoxQty: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: palette.slate900,
-    marginTop: 2,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: palette.slate200,
-    marginVertical: spacing.sm,
-  },
-  metaText: {
-    fontSize: 12,
-    color: palette.slate600,
-  },
-  bold: {
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  linkText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: palette.primary600,
-    marginTop: 2,
-  },
-  actionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  subText: {
-    fontSize: 12,
-    color: palette.slate500,
-    marginTop: 2,
-  },
-  historyRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: palette.slate100,
-  },
-  historyDate: {
-    fontSize: 12,
-    color: palette.slate700,
-  },
-  historyVal: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  ledgerCard: {
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: palette.slate50,
-    borderWidth: 1,
-    borderColor: palette.slate200,
-  },
-  ledgerType: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: palette.primary600,
-  },
-  ledgerDate: {
-    fontSize: 11,
-    color: palette.slate500,
-  },
-  noteText: {
-    fontSize: 11,
-    color: palette.slate500,
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  modalCard: {
-    backgroundColor: palette.white,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: palette.slate700,
-    marginTop: spacing.md,
-    marginBottom: 4,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: palette.slate300,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: palette.slate900,
-  },
+    scrollContent: {
+      padding: spacing.md,
+      paddingBottom: 40,
+    },
+    section: {
+      marginBottom: spacing.md,
+    },
+    catLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.primary600,
+    },
+    productName: {
+      fontSize: 20,
+      fontWeight: '800',
+      color: palette.slate900,
+      marginTop: 2,
+    },
+    descText: {
+      fontSize: 13,
+      color: palette.slate600,
+      marginTop: 4,
+    },
+    subHeader: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.slate600,
+    },
+    variantChip: {
+      paddingVertical: 7,
+      paddingHorizontal: 12,
+      borderRadius: radius.pill,
+      backgroundColor: palette.slate100,
+      borderWidth: 1,
+      borderColor: palette.slate300,
+    },
+    variantChipActive: {
+      backgroundColor: palette.primary600,
+      borderColor: palette.primary600,
+    },
+    variantChipText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.slate700,
+    },
+    variantChipTextActive: {
+      color: '#FFFFFF',
+    },
+    stockBox: {
+      marginTop: spacing.md,
+      padding: spacing.md,
+      backgroundColor: palette.slate50,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+    },
+    stockBoxRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    stockBoxLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: palette.slate500,
+    },
+    stockBoxQty: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: palette.slate900,
+    },
+    divider: {
+      height: 1,
+      backgroundColor: palette.slate200,
+      marginVertical: spacing.sm,
+    },
+    metaText: {
+      fontSize: 13,
+      color: palette.slate600,
+    },
+    bold: {
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    linkText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: palette.primary600,
+    },
+    actionsGrid: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+      marginTop: spacing.md,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    subText: {
+      fontSize: 12,
+      color: palette.slate500,
+    },
+    ledgerCard: {
+      padding: spacing.sm,
+      backgroundColor: palette.slate50,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+    },
+    ledgerType: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    ledgerDate: {
+      fontSize: 12,
+      color: palette.slate500,
+    },
+    archiveBtn: {
+      alignItems: 'center',
+      paddingVertical: 12,
+    },
+    archiveBtnText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: palette.slate500,
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(15, 23, 42, 0.55)',
+      justifyContent: 'center',
+      padding: spacing.xl,
+    },
+    modalCard: {
+      backgroundColor: palette.white,
+      borderRadius: radius.lg,
+      padding: spacing.xl,
+    },
+    label: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: palette.slate700,
+      marginTop: spacing.md,
+      marginBottom: 4,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: palette.slate300,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 10,
+      fontSize: 14,
+      color: palette.slate900,
+      backgroundColor: palette.slate50,
+    },
     modalActions: {
       flexDirection: 'row',
       gap: spacing.sm,

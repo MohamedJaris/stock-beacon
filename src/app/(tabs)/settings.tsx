@@ -4,6 +4,7 @@ import {
 } from '@/application/services/BackupRestoreService';
 import {
   PrimaryButton,
+  SecondaryButton,
   SectionCard,
 } from '@/components/common/AppComponents';
 import { getDatabase } from '@/data/database/DatabaseConnection';
@@ -11,13 +12,11 @@ import { DateFormatOption } from '@/domain/enums';
 import { useAppStore } from '@/stores/useAppStore';
 import { palette, radius, spacing, ThemeMode } from '@/theme';
 import { Feather } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   Modal,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -26,17 +25,11 @@ import {
 
 export default function SettingsScreen() {
   const styles = getStyles();
-  const router = useRouter();
   const profile = useAppStore((s) => s.profile);
   const themeMode = useAppStore((s) => s.themeMode);
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const setThemeMode = useAppStore((s) => s.setThemeMode);
-  const suppliers = useAppStore((s) => s.suppliers);
-  const notificationSettings = useAppStore((s) => s.notificationSettings);
   const updateBusinessProfile = useAppStore((s) => s.updateBusinessProfile);
-  const updateNotificationSettings = useAppStore(
-    (s) => s.updateNotificationSettings
-  );
   const createBackupJson = useAppStore((s) => s.createBackupJson);
   const restoreBackupJson = useAppStore((s) => s.restoreBackupJson);
 
@@ -52,12 +45,6 @@ export default function SettingsScreen() {
   );
   const [dateFormat, setDateFormat] = useState<DateFormatOption>(
     profile?.dateFormat || 'DD/MM/YYYY'
-  );
-  const [reminderTime, setReminderTime] = useState(
-    notificationSettings?.dailyReminderTime || '20:00'
-  );
-  const [summaryTime, setSummaryTime] = useState(
-    notificationSettings?.dailySummaryTime || '09:00'
   );
 
   // Backup / Restore states
@@ -75,7 +62,7 @@ export default function SettingsScreen() {
     if (!businessName.trim()) {
       setStatusMessage({
         type: 'error',
-        text: 'Business name cannot be empty.',
+        text: 'Shop name cannot be empty.',
       });
       return;
     }
@@ -88,7 +75,7 @@ export default function SettingsScreen() {
     });
     setStatusMessage({
       type: 'success',
-      text: 'Business profile settings updated.',
+      text: 'Shop profile saved.',
     });
   };
 
@@ -111,7 +98,7 @@ export default function SettingsScreen() {
         document.body.removeChild(a);
         setStatusMessage({
           type: 'success',
-          text: `Backup downloaded to your laptop (${fileName}).`,
+          text: `Backup downloaded (${fileName}).`,
         });
         return;
       }
@@ -130,12 +117,12 @@ export default function SettingsScreen() {
       if (canShare) {
         await Sharing.shareAsync(fileUri, {
           mimeType: 'application/json',
-          dialogTitle: 'Save or Share StockBeacon Versioned Backup',
+          dialogTitle: 'Save StockBeacon Backup',
         });
       }
       setStatusMessage({
         type: 'success',
-        text: `Backup created and ready to save externally (${fileUri}).`,
+        text: 'Backup exported.',
       });
     } catch (err) {
       setStatusMessage({
@@ -180,16 +167,8 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleValidateManualJson = async () => {
-    const db = await getDatabase();
-    const svc = new BackupRestoreService(db);
-    const val = svc.validateBackupJson(restoreJsonInput);
-    setValidationPreview(val);
-  };
-
   const handleConfirmRestore = async () => {
     try {
-      // Safety backup before destructive restore
       await createBackupJson();
       await restoreBackupJson(restoreJsonInput);
       setShowRestoreModal(false);
@@ -197,12 +176,12 @@ export default function SettingsScreen() {
       setValidationPreview(null);
       setStatusMessage({
         type: 'success',
-        text: 'Database successfully restored and verified from backup.',
+        text: 'Backup restored.',
       });
     } catch (err) {
       setStatusMessage({
         type: 'error',
-        text: `Restore aborted safely: ${(err as Error).message}`,
+        text: `Restore failed: ${(err as Error).message}`,
       });
     }
   };
@@ -248,20 +227,15 @@ export default function SettingsScreen() {
         </View>
       ) : null}
 
-      {/* Appearance: Light Mode / Dark Mode / System Selector */}
+      {/* 1. Theme Mode */}
       <SectionCard style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: palette.slate900 }]}>
-          Appearance & Theme Mode
-        </Text>
-        <Text style={[styles.subText, { color: palette.slate500 }]}>
-          Switch between Light Mode, Dark Mode, or automatic System preference.
-        </Text>
-        <View style={[styles.row, { marginTop: spacing.md }]}>
+        <Text style={styles.sectionTitle}>Appearance</Text>
+        <View style={[styles.row, { marginTop: spacing.sm }]}>
           {(
             [
-              { key: 'light', label: 'Light Mode', icon: 'sun' },
-              { key: 'dark', label: 'Dark Mode', icon: 'moon' },
-              { key: 'system', label: 'System', icon: 'smartphone' },
+              { key: 'light', label: 'Light', icon: 'sun' },
+              { key: 'dark', label: 'Dark', icon: 'moon' },
+              { key: 'system', label: 'Auto', icon: 'smartphone' },
             ] as {
               key: ThemeMode;
               label: string;
@@ -273,20 +247,7 @@ export default function SettingsScreen() {
               <TouchableOpacity
                 key={opt.key}
                 onPress={() => setThemeMode(opt.key)}
-                style={[
-                  styles.fmtChip,
-                  {
-                    backgroundColor: active
-                      ? palette.primary600
-                      : palette.slate100,
-                    borderColor: active
-                      ? palette.primary600
-                      : palette.slate300,
-                    flexDirection: 'row',
-                    justifyContent: 'center',
-                    gap: 6,
-                  },
-                ]}
+                style={[styles.fmtChip, active && styles.fmtChipActive]}
               >
                 <Feather
                   name={opt.icon}
@@ -294,10 +255,7 @@ export default function SettingsScreen() {
                   color={active ? '#FFFFFF' : palette.slate700}
                 />
                 <Text
-                  style={[
-                    styles.fmtText,
-                    { color: active ? '#FFFFFF' : palette.slate700 },
-                  ]}
+                  style={[styles.fmtText, active && styles.fmtTextActive]}
                 >
                   {opt.label}
                 </Text>
@@ -307,266 +265,105 @@ export default function SettingsScreen() {
         </View>
       </SectionCard>
 
-      {/* Suppliers Module Shortcut */}
+      {/* 2. Shop Profile */}
       <SectionCard style={styles.section}>
-        <View style={styles.rowBetween}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.sectionTitle}>
-              Supplier Management ({suppliers.length})
-            </Text>
-            <Text style={styles.subText}>
-              Manage optional supplier contacts & view supplier inward histories
-            </Text>
-          </View>
-          <PrimaryButton
-            title="Open Suppliers"
-            variant="secondary"
-            icon="truck"
-            onPress={() => router.push('/suppliers')}
-          />
-        </View>
-      </SectionCard>
+        <Text style={styles.sectionTitle}>Shop Details</Text>
 
-      {/* Backup & Restore Center */}
-      <SectionCard style={styles.section}>
-        <Text style={styles.sectionTitle}>
-          Offline Data Backup & Safe Restore
-        </Text>
-        <Text style={styles.subText}>
-          Export your complete local SQLite database (products, variants, stock events, threshold history, and daily snapshots) into a checksum-verified backup file.
-        </Text>
-
-        <View style={styles.btnCol}>
-          <PrimaryButton
-            title="Export & Share Full Backup File"
-            icon="download-cloud"
-            onPress={handleExportBackupFile}
-          />
-          <PrimaryButton
-            title="Select Backup File from Device to Restore"
-            variant="outline"
-            icon="upload"
-            onPress={handlePickBackupDocument}
-          />
-          <PrimaryButton
-            title="Validate / Restore from Backup JSON"
-            variant="outline"
-            icon="shield"
-            onPress={() => {
-              setValidationPreview(null);
-              setShowRestoreModal(true);
-            }}
-          />
-        </View>
-      </SectionCard>
-
-      {/* Local Notification & Reminder Settings */}
-      {notificationSettings ? (
-        <SectionCard style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            Local Alerts & Daily Reminders
-          </Text>
-          <Text style={styles.subText}>
-            Operates 100% locally on your device without remote push servers.
-          </Text>
-
-          <View style={styles.switchRow}>
-            <Text style={styles.label}>Low-Stock Transition Alerts</Text>
-            <Switch
-              value={notificationSettings.lowStockAlertsEnabled}
-              onValueChange={(val) =>
-                updateNotificationSettings({ lowStockAlertsEnabled: val })
-              }
-            />
-          </View>
-
-          <View style={styles.switchRow}>
-            <Text style={styles.label}>Out-of-Stock Transition Alerts</Text>
-            <Switch
-              value={notificationSettings.outOfStockAlertsEnabled}
-              onValueChange={(val) =>
-                updateNotificationSettings({ outOfStockAlertsEnabled: val })
-              }
-            />
-          </View>
-
-          <View style={styles.switchRow}>
-            <Text style={styles.label}>Daily Stock Count Reminder</Text>
-            <Switch
-              value={notificationSettings.dailyReminderEnabled}
-              onValueChange={(val) =>
-                updateNotificationSettings({ dailyReminderEnabled: val })
-              }
-            />
-          </View>
-
-          <View style={styles.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.smallLabel}>Reminder Time (HH:mm)</Text>
-              <TextInput
-                style={styles.input}
-                value={reminderTime}
-                onChangeText={setReminderTime}
-                onBlur={() =>
-                  updateNotificationSettings({
-                    dailyReminderTime: reminderTime,
-                  })
-                }
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.smallLabel}>Summary Time (HH:mm)</Text>
-              <TextInput
-                style={styles.input}
-                value={summaryTime}
-                onChangeText={setSummaryTime}
-                onBlur={() =>
-                  updateNotificationSettings({ dailySummaryTime: summaryTime })
-                }
-              />
-            </View>
-          </View>
-        </SectionCard>
-      ) : null}
-
-      {/* Business Workspace Profile */}
-      <SectionCard style={styles.section}>
-        <Text style={styles.sectionTitle}>Business Profile Configuration</Text>
-
-        <Text style={styles.smallLabel}>Business Name *</Text>
+        <Text style={styles.label}>Shop Name *</Text>
         <TextInput
           style={styles.input}
           value={businessName}
           onChangeText={setBusinessName}
         />
 
-        <Text style={styles.smallLabel}>Business Industry Type</Text>
-        <TextInput
-          style={styles.input}
-          value={businessType}
-          onChangeText={setBusinessType}
-        />
-
-        <Text style={styles.smallLabel}>Owner Name</Text>
-        <TextInput
-          style={styles.input}
-          value={ownerName}
-          onChangeText={setOwnerName}
-        />
-
-        <Text style={styles.smallLabel}>Contact Phone</Text>
-        <TextInput
-          style={styles.input}
-          value={contactNumber}
-          onChangeText={setContactNumber}
-        />
-
-        <Text style={styles.smallLabel}>Preferred Date Format</Text>
         <View style={styles.row}>
-          {(['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'] as DateFormatOption[]).map(
-            (fmt) => (
-              <TouchableOpacity
-                key={fmt}
-                onPress={() => setDateFormat(fmt)}
-                style={[
-                  styles.fmtChip,
-                  dateFormat === fmt && styles.fmtChipActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.fmtText,
-                    dateFormat === fmt && styles.fmtTextActive,
-                  ]}
-                >
-                  {fmt}
-                </Text>
-              </TouchableOpacity>
-            )
-          )}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>Owner Name</Text>
+            <TextInput
+              style={styles.input}
+              value={ownerName}
+              onChangeText={setOwnerName}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>Phone</Text>
+            <TextInput
+              style={styles.input}
+              value={contactNumber}
+              onChangeText={setContactNumber}
+              keyboardType="phone-pad"
+            />
+          </View>
         </View>
 
         <PrimaryButton
-          title="Save Business Profile"
+          title="Save Shop Details"
           icon="save"
           onPress={handleSaveProfile}
           style={{ marginTop: spacing.md }}
         />
       </SectionCard>
 
-      {/* Restore Confirmation & Validation Modal */}
+      {/* 3. Backup & Restore */}
+      <SectionCard style={styles.section}>
+        <Text style={styles.sectionTitle}>Backup & Restore</Text>
+        <Text style={styles.subText}>
+          Save a backup of your products and stock to your phone, or restore from a saved backup file.
+        </Text>
+
+        <View style={[styles.row, { marginTop: spacing.md }]}>
+          <PrimaryButton
+            title="Export Backup"
+            icon="download"
+            onPress={handleExportBackupFile}
+            style={{ flex: 1 }}
+          />
+          <SecondaryButton
+            title="Restore File"
+            icon="upload"
+            onPress={handlePickBackupDocument}
+            style={{ flex: 1 }}
+          />
+        </View>
+      </SectionCard>
+
+      {/* Restore Confirmation Modal */}
       <Modal visible={showRestoreModal} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.sectionTitle}>
-              Validate & Restore Backup Bundle
-            </Text>
-            <Text style={styles.subText}>
-              Paste or inspect the backup JSON below. Checksum & schema integrity are verified before restoring.
-            </Text>
-
-            <TextInput
-              style={[styles.input, { height: 110, marginTop: spacing.sm }]}
-              multiline
-              placeholder="Paste StockBeacon backup JSON content..."
-              value={restoreJsonInput}
-              onChangeText={setRestoreJsonInput}
-            />
-
-            <PrimaryButton
-              title="Verify Backup Integrity & Checksum"
-              variant="secondary"
-              onPress={handleValidateManualJson}
-              style={{ marginTop: spacing.sm }}
-            />
+            <Text style={styles.modalTitle}>Restore Backup</Text>
 
             {validationPreview ? (
               <View
                 style={[
                   styles.previewBox,
                   {
-                    backgroundColor: validationPreview.isValid
+                    backgroundColor: validationPreview.valid
                       ? palette.success50
                       : palette.danger50,
                   },
                 ]}
               >
-                {validationPreview.isValid && validationPreview.summary ? (
-                  <>
-                    <Text style={styles.validTitle}>
-                      ✓ Valid StockBeacon Backup (v
-                      {validationPreview.summary.schemaVersion})
-                    </Text>
-                    <Text style={styles.subText}>
-                      Business: {validationPreview.summary.businessName}
-                    </Text>
-                    <Text style={styles.subText}>
-                      Products: {validationPreview.summary.productsCount} •
-                      Variants: {validationPreview.summary.variantsCount} •
-                      Stock Events: {validationPreview.summary.stockEventsCount}
-                    </Text>
-                  </>
-                ) : (
-                  <Text style={styles.invalidTitle}>
-                    ✕ {validationPreview.error}
-                  </Text>
-                )}
+                <Text style={{ fontWeight: '700', color: palette.slate900 }}>
+                  {validationPreview.valid
+                    ? `Valid Backup (${validationPreview.productCount} products, ${validationPreview.stockEventCount} entries)`
+                    : `Invalid File: ${validationPreview.error}`}
+                </Text>
               </View>
             ) : null}
 
-            <View style={styles.row}>
-              <PrimaryButton
+            <View style={[styles.row, { marginTop: spacing.lg }]}>
+              <SecondaryButton
                 title="Cancel"
-                variant="outline"
                 onPress={() => setShowRestoreModal(false)}
-                style={{ flex: 1, marginTop: spacing.md }}
+                style={{ flex: 1 }}
               />
-              {validationPreview?.isValid ? (
+              {validationPreview?.valid ? (
                 <PrimaryButton
-                  title="Confirm Restore"
+                  title="Restore Now"
                   variant="danger"
                   onPress={handleConfirmRestore}
-                  style={{ flex: 1, marginTop: spacing.md }}
+                  style={{ flex: 1 }}
                 />
               ) : null}
             </View>
@@ -583,135 +380,110 @@ function getStyles() {
       flex: 1,
       backgroundColor: palette.slate50,
     },
-  scrollContent: {
-    padding: spacing.lg,
-    paddingBottom: 40,
-  },
-  section: {
-    marginBottom: spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  subText: {
-    fontSize: 12,
-    color: palette.slate500,
-    marginTop: 2,
-    lineHeight: 18,
-  },
-  rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  btnCol: {
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: palette.slate800,
-  },
-  smallLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: palette.slate600,
-    marginTop: spacing.sm,
-    marginBottom: 4,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: palette.slate300,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 9,
-    fontSize: 14,
-    color: palette.slate900,
-    backgroundColor: palette.slate50,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  fmtChip: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.slate300,
-    alignItems: 'center',
-    backgroundColor: palette.white,
-  },
-  fmtChipActive: {
-    backgroundColor: palette.primary600,
-    borderColor: palette.primary600,
-  },
-  fmtText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: palette.slate700,
-  },
-  fmtTextActive: {
-    color: palette.white,
-  },
-  banner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    marginBottom: spacing.md,
-  },
-  bannerSuccess: {
-    backgroundColor: palette.success50,
-    borderColor: palette.success100,
-  },
-  bannerError: {
-    backgroundColor: palette.danger50,
-    borderColor: palette.danger100,
-  },
-  bannerText: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  modalCard: {
-    backgroundColor: palette.white,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-  },
-  previewBox: {
-    marginTop: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.md,
-  },
-  validTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: palette.success700,
-  },
-    invalidTitle: {
+    scrollContent: {
+      padding: spacing.md,
+      paddingBottom: 40,
+    },
+    banner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      marginBottom: spacing.md,
+    },
+    bannerSuccess: {
+      backgroundColor: palette.success50,
+      borderColor: palette.success100,
+    },
+    bannerError: {
+      backgroundColor: palette.danger50,
+      borderColor: palette.danger100,
+    },
+    bannerText: {
+      flex: 1,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    section: {
+      marginBottom: spacing.md,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    subText: {
+      fontSize: 12,
+      color: palette.slate500,
+      marginTop: 4,
+    },
+    row: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    label: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: palette.slate700,
+      marginTop: spacing.md,
+      marginBottom: 4,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: palette.slate300,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 10,
+      fontSize: 14,
+      color: palette.slate900,
+      backgroundColor: palette.slate50,
+    },
+    fmtChip: {
+      flex: 1,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 10,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+      backgroundColor: palette.slate100,
+      alignItems: 'center',
+    },
+    fmtChipActive: {
+      backgroundColor: palette.primary600,
+      borderColor: palette.primary600,
+    },
+    fmtText: {
       fontSize: 13,
       fontWeight: '700',
-      color: palette.danger700,
+      color: palette.slate700,
+    },
+    fmtTextActive: {
+      color: '#FFFFFF',
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(15, 23, 42, 0.55)',
+      justifyContent: 'center',
+      padding: spacing.xl,
+    },
+    modalCard: {
+      backgroundColor: palette.white,
+      borderRadius: radius.lg,
+      padding: spacing.xl,
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: palette.slate900,
+    },
+    previewBox: {
+      marginTop: spacing.md,
+      padding: spacing.md,
+      borderRadius: radius.md,
     },
   });
 }

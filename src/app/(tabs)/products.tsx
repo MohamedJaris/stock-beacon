@@ -1,17 +1,13 @@
 import {
   EmptyStateView,
   PrimaryButton,
+  SecondaryButton,
   SectionCard,
 } from '@/components/common/AppComponents';
-import {
-  ProvenanceBadge,
-  StockStatusBadge,
-} from '@/components/inventory/StatusBadge';
-import { formatDisplayDate } from '@/core/utils/dateUtils';
 import { formatQuantity } from '@/core/utils/quantityMath';
 import { StockStatus } from '@/domain/enums';
 import { useAppStore } from '@/stores/useAppStore';
-import { palette, radius, spacing } from '@/theme';
+import { palette, radius, shadows, spacing } from '@/theme';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
@@ -19,31 +15,29 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 
-type SubTab = 'catalog' | 'categories' | 'units';
-type SortOption = 'input_order' | 'name' | 'quantity_asc' | 'quantity_desc';
+type SubTab = 'catalog' | 'categories';
+type ActiveDropdown = 'category' | 'product' | 'variant' | null;
 
 export default function ProductsScreen() {
   const styles = getStyles();
   const router = useRouter();
-  const profile = useAppStore((s) => s.profile);
-  const isDarkMode = useAppStore((s) => s.isDarkMode);
   const inventoryItems = useAppStore((s) => s.inventoryItems);
+  const isDarkMode = useAppStore((s) => s.isDarkMode);
   const categories = useAppStore((s) => s.categories);
-  const units = useAppStore((s) => s.units);
   const addCategory = useAppStore((s) => s.addCategory);
   const updateCategory = useAppStore((s) => s.updateCategory);
   const removeCategory = useAppStore((s) => s.removeCategory);
-  const addUnit = useAppStore((s) => s.addUnit);
 
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('catalog');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Quick Filter Dropdown States
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
     null
   );
@@ -53,18 +47,14 @@ export default function ProductsScreen() {
   const [selectedVariantOption, setSelectedVariantOption] = useState<
     string | null
   >(null);
+  const [openDropdown, setOpenDropdown] = useState<ActiveDropdown>(null);
+
   const [selectedStatus, setSelectedStatus] = useState<StockStatus | null>(
     null
   );
-  // Default sort is 'input_order' so sizes like S, M, L, XL, XXL or 30, 32, 34, 36, 38, 40 stay in exact input order!
-  const [sortBy, setSortBy] = useState<SortOption>('input_order');
+  const [sortBy, setSortBy] = useState<'input_order' | 'name'>('input_order');
 
-  // Quick Filter Dropdown Modals
-  const [openDropdown, setOpenDropdown] = useState<
-    'category' | 'product' | 'variant' | null
-  >(null);
-
-  // Category modal state (Create & Edit)
+  // Category modal state (Add & Edit)
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [newCatName, setNewCatName] = useState('');
@@ -82,14 +72,7 @@ export default function ProductsScreen() {
     null
   );
 
-  // Unit modal state
-  const [showUnitModal, setShowUnitModal] = useState(false);
-  const [newUnitName, setNewUnitName] = useState('');
-  const [newUnitSymbol, setNewUnitSymbol] = useState('');
-  const [newUnitFractional, setNewUnitFractional] = useState(false);
-  const [unitError, setUnitError] = useState<string | null>(null);
-
-  // Distinct products for the Quick Product Dropdown (filtered by selected category if any)
+  // Distinct products for the Quick Product Dropdown
   const availableProducts = useMemo(() => {
     const map = new Map<
       string,
@@ -110,7 +93,7 @@ export default function ProductsScreen() {
     return Array.from(map.values());
   }, [inventoryItems, selectedCategoryId]);
 
-  // Distinct sizes / variant names in EXACT input order (never alphabetically scrambled!)
+  // Distinct sizes / variant names in EXACT input order
   const availableVariantOptions = useMemo(() => {
     const seen = new Set<string>();
     const ordered: string[] = [];
@@ -164,22 +147,9 @@ export default function ProductsScreen() {
     });
 
     list.sort((a, b) => {
-      if (sortBy === 'quantity_asc') {
-        return (
-          (a.recordedQuantity ?? Number.POSITIVE_INFINITY) -
-          (b.recordedQuantity ?? Number.POSITIVE_INFINITY)
-        );
-      }
-      if (sortBy === 'quantity_desc') {
-        return (
-          (b.recordedQuantity ?? Number.NEGATIVE_INFINITY) -
-          (a.recordedQuantity ?? Number.NEGATIVE_INFINITY)
-        );
-      }
       if (sortBy === 'name') {
         return a.displayName.localeCompare(b.displayName);
       }
-      // Default: 'input_order' — keeps exact size/variant sequence (e.g., S, M, L, XL, XXL or 30, 32, 34, 36, 38, 40)
       if (a.productId === b.productId) {
         return (a.variantSortOrder ?? 0) - (b.variantSortOrder ?? 0);
       }
@@ -198,11 +168,10 @@ export default function ProductsScreen() {
   ]);
 
   const selectedCategoryName =
-    categories.find((c) => c.id === selectedCategoryId)?.name ||
-    'All Categories';
+    categories.find((c) => c.id === selectedCategoryId)?.name || 'All';
   const selectedProductName =
     availableProducts.find((p) => p.productId === selectedProductId)
-      ?.productName || 'All Items / Styles';
+      ?.productName || 'All Items';
 
   const openCreateCategoryModal = () => {
     setEditingCatId(null);
@@ -273,67 +242,53 @@ export default function ProductsScreen() {
     }
   };
 
-  const handleCreateUnit = async () => {
-    setUnitError(null);
-    if (!newUnitName.trim() || !newUnitSymbol.trim()) {
-      setUnitError('Unit name and symbol are required.');
-      return;
-    }
-    try {
-      await addUnit({
-        name: newUnitName.trim(),
-        symbol: newUnitSymbol.trim(),
-        allowFractional: newUnitFractional,
-      });
-      setNewUnitName('');
-      setNewUnitSymbol('');
-      setNewUnitFractional(false);
-      setShowUnitModal(false);
-    } catch (err) {
-      setUnitError((err as Error).message);
-    }
-  };
-
   return (
     <View style={styles.screen}>
-      {/* Sub-navigation bar */}
+      {/* Clean 2-Tab Bar */}
       <View style={styles.subTabBar}>
-        {(
-          [
-            { key: 'catalog', label: `SKUs (${inventoryItems.length})` },
-            { key: 'categories', label: `Categories (${categories.length})` },
-            { key: 'units', label: `Units (${units.length})` },
-          ] as { key: SubTab; label: string }[]
-        ).map((tab) => (
-          <TouchableOpacity
-            key={tab.key}
-            onPress={() => setActiveSubTab(tab.key)}
+        <TouchableOpacity
+          onPress={() => setActiveSubTab('catalog')}
+          style={[
+            styles.subTabBtn,
+            activeSubTab === 'catalog' && styles.subTabBtnActive,
+          ]}
+        >
+          <Text
             style={[
-              styles.subTabBtn,
-              activeSubTab === tab.key && styles.subTabBtnActive,
+              styles.subTabText,
+              activeSubTab === 'catalog' && styles.subTabTextActive,
             ]}
           >
-            <Text
-              style={[
-                styles.subTabText,
-                activeSubTab === tab.key && styles.subTabTextActive,
-              ]}
-            >
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+            Products ({inventoryItems.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setActiveSubTab('categories')}
+          style={[
+            styles.subTabBtn,
+            activeSubTab === 'categories' && styles.subTabBtnActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.subTabText,
+              activeSubTab === 'categories' && styles.subTabTextActive,
+            ]}
+          >
+            Categories ({categories.length})
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {activeSubTab === 'catalog' ? (
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Search & Add Row */}
+          {/* Search & New Product Row */}
           <View style={styles.topRow}>
             <View style={styles.searchBox}>
               <Feather name="search" size={16} color={palette.slate400} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search dress, saree, pant, SKU..."
+                placeholder="Search item..."
                 placeholderTextColor={palette.slate400}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -345,45 +300,17 @@ export default function ProductsScreen() {
               ) : null}
             </View>
             <TouchableOpacity
-              style={styles.scanBtn}
-              onPress={() => router.push('/scanner')}
-            >
-              <Feather name="maximize" size={18} color={palette.slate800} />
-            </TouchableOpacity>
-            <TouchableOpacity
               style={styles.addBtn}
               onPress={() => router.push('/product/new')}
             >
               <Feather name="plus" size={18} color="#FFFFFF" />
-              <Text style={styles.addBtnText}>Add</Text>
+              <Text style={styles.addBtnText}>New</Text>
             </TouchableOpacity>
           </View>
 
-          {/* ================================================================
-              QUICK ITEM PICKER DROPDOWN BAR (Category -> Item/Saree -> Size/Type)
-             ================================================================ */}
-          <SectionCard style={styles.quickFilterCard}>
-            <View style={styles.rowBetween}>
-              <Text style={styles.quickFilterHeader}>
-                Quick Shop Filter Dropdowns
-              </Text>
-              {selectedCategoryId ||
-              selectedProductId ||
-              selectedVariantOption ? (
-                <TouchableOpacity
-                  onPress={() => {
-                    setSelectedCategoryId(null);
-                    setSelectedProductId(null);
-                    setSelectedVariantOption(null);
-                  }}
-                >
-                  <Text style={styles.clearFilterText}>Reset Filters</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-
+          {/* Compact Cascading Filter Bar (Category -> Product -> Size/Type) */}
+          <View style={styles.filterContainer}>
             <View style={styles.dropdownRow}>
-              {/* 1. Category Dropdown */}
               <TouchableOpacity
                 style={[
                   styles.dropdownSelector,
@@ -392,19 +319,18 @@ export default function ProductsScreen() {
                 onPress={() => setOpenDropdown('category')}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.dropdownLabel}>1. Category</Text>
+                  <Text style={styles.dropdownLabel}>Category</Text>
                   <Text style={styles.dropdownValue} numberOfLines={1}>
                     {selectedCategoryName}
                   </Text>
                 </View>
                 <Feather
                   name="chevron-down"
-                  size={15}
-                  color={palette.slate600}
+                  size={14}
+                  color={palette.slate500}
                 />
               </TouchableOpacity>
 
-              {/* 2. Product / Saree / Dress Dropdown */}
               <TouchableOpacity
                 style={[
                   styles.dropdownSelector,
@@ -413,19 +339,18 @@ export default function ProductsScreen() {
                 onPress={() => setOpenDropdown('product')}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.dropdownLabel}>2. Product / Name</Text>
+                  <Text style={styles.dropdownLabel}>Product</Text>
                   <Text style={styles.dropdownValue} numberOfLines={1}>
                     {selectedProductName}
                   </Text>
                 </View>
                 <Feather
                   name="chevron-down"
-                  size={15}
-                  color={palette.slate600}
+                  size={14}
+                  color={palette.slate500}
                 />
               </TouchableOpacity>
 
-              {/* 3. Size / Type Dropdown (S, M, L, XL, XXL / 30..40 / Elastic, Zip) */}
               {availableVariantOptions.length > 0 ? (
                 <TouchableOpacity
                   style={[
@@ -437,44 +362,28 @@ export default function ProductsScreen() {
                   onPress={() => setOpenDropdown('variant')}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.dropdownLabel}>3. Size / Type</Text>
+                    <Text style={styles.dropdownLabel}>Size / Type</Text>
                     <Text style={styles.dropdownValue} numberOfLines={1}>
-                      {selectedVariantOption || 'All Sizes / Types'}
+                      {selectedVariantOption || 'All'}
                     </Text>
                   </View>
                   <Feather
                     name="chevron-down"
-                    size={15}
-                    color={palette.slate600}
+                    size={14}
+                    color={palette.slate500}
                   />
                 </TouchableOpacity>
               ) : null}
             </View>
 
-            {/* Quick Size / Type Pills in exact input sequence */}
+            {/* Size / Type Pills in exact input sequence */}
             {availableVariantOptions.length > 0 ? (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                style={{ marginTop: spacing.sm }}
+                style={{ marginTop: 8 }}
                 contentContainerStyle={{ gap: 6 }}
               >
-                <TouchableOpacity
-                  onPress={() => setSelectedVariantOption(null)}
-                  style={[
-                    styles.sizePill,
-                    !selectedVariantOption && styles.sizePillActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.sizePillText,
-                      !selectedVariantOption && styles.sizePillTextActive,
-                    ]}
-                  >
-                    All Sizes
-                  </Text>
-                </TouchableOpacity>
                 {availableVariantOptions.map((opt) => {
                   const active = selectedVariantOption === opt;
                   return (
@@ -498,143 +407,153 @@ export default function ProductsScreen() {
                 })}
               </ScrollView>
             ) : null}
-          </SectionCard>
 
-          {/* Status & Sort Order Row */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ marginBottom: spacing.md }}
-            contentContainerStyle={{ gap: spacing.xs }}
-          >
-            {/* Sort Order Selector: Input Size Order vs A-Z vs Quantity */}
-            <TouchableOpacity
-              onPress={() =>
-                setSortBy((prev) =>
-                  prev === 'input_order'
-                    ? 'name'
-                    : prev === 'name'
-                    ? 'quantity_asc'
-                    : prev === 'quantity_asc'
-                    ? 'quantity_desc'
-                    : 'input_order'
-                )
-              }
-              style={styles.sortChip}
-            >
-              <Feather name="sliders" size={12} color={palette.primary600} />
-              <Text style={styles.sortChipText}>
-                Order:{' '}
-                {sortBy === 'input_order'
-                  ? 'Size / Input Order'
-                  : sortBy === 'name'
-                  ? 'A–Z Alphabetical'
-                  : sortBy === 'quantity_asc'
-                  ? 'Lowest Stock'
-                  : 'Highest Stock'}
-              </Text>
-            </TouchableOpacity>
+            {/* Compact Status & Sort Bar */}
+            <View style={styles.statusFilterRow}>
+              <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                {(
+                  [
+                    { status: null, label: 'All' },
+                    { status: 'LOW_STOCK', label: 'Low' },
+                    { status: 'OUT_OF_STOCK', label: 'Out' },
+                  ] as { status: StockStatus | null; label: string }[]
+                ).map((st) => {
+                  const active = selectedStatus === st.status;
+                  return (
+                    <TouchableOpacity
+                      key={st.label}
+                      onPress={() => setSelectedStatus(st.status)}
+                      style={[
+                        styles.filterChip,
+                        active && styles.filterChipActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          active && styles.filterChipTextActive,
+                        ]}
+                      >
+                        {st.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
-            {(
-              [
-                { status: null, label: 'All Statuses' },
-                { status: 'LOW_STOCK', label: 'Low Stock' },
-                { status: 'OUT_OF_STOCK', label: 'Out of Stock' },
-                { status: 'IN_STOCK', label: 'In Stock' },
-              ] as { status: StockStatus | null; label: string }[]
-            ).map((st) => {
-              const active = selectedStatus === st.status;
-              return (
-                <TouchableOpacity
-                  key={st.label}
-                  onPress={() => setSelectedStatus(st.status)}
-                  style={[
-                    styles.filterChip,
-                    active && styles.filterChipActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      active && styles.filterChipTextActive,
-                    ]}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {selectedCategoryId ||
+                selectedProductId ||
+                selectedVariantOption ||
+                selectedStatus ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSelectedCategoryId(null);
+                      setSelectedProductId(null);
+                      setSelectedVariantOption(null);
+                      setSelectedStatus(null);
+                    }}
                   >
-                    {st.label}
+                    <Text style={styles.clearFilterText}>Reset</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                <TouchableOpacity
+                  onPress={() =>
+                    setSortBy((prev) =>
+                      prev === 'input_order' ? 'name' : 'input_order'
+                    )
+                  }
+                  style={styles.sortChip}
+                >
+                  <Feather name="sliders" size={12} color={palette.primary600} />
+                  <Text style={styles.sortChipText}>
+                    {sortBy === 'input_order' ? 'Size Order' : 'A–Z'}
                   </Text>
                 </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+              </View>
+            </View>
+          </View>
 
-          {/* Product Items List */}
+          {/* Clean Product List */}
           {filteredItems.length === 0 ? (
             <EmptyStateView
               icon="package"
-              title="No Matching Products Found"
-              message="Add a new product (such as Ready-Made Dresses, Pants, Nighties, Tops, or Sarees) or adjust your dropdown filters."
-              actionTitle="Add New Product"
+              title="No Items Found"
+              message="Add a new product or clear your filters."
+              actionTitle="Add Product"
               onActionPress={() => router.push('/product/new')}
             />
           ) : (
-            <View style={{ gap: spacing.sm }}>
-              {filteredItems.map((item) => (
-                <TouchableOpacity
-                  key={item.itemKey}
-                  activeOpacity={0.85}
-                  onPress={() => router.push(`/product/${item.productId}`)}
-                >
-                  <SectionCard style={styles.itemCard}>
-                    <View style={styles.itemTopRow}>
-                      <View style={{ flex: 1 }}>
-                        <View style={styles.titleWithSizeRow}>
-                          <Text style={styles.itemTitle}>
-                            {item.productName}
-                          </Text>
-                          {item.variantName ? (
-                            <View style={styles.sizeTagBadge}>
-                              <Text style={styles.sizeTagText}>
-                                {item.variantName}
-                              </Text>
-                            </View>
-                          ) : null}
-                        </View>
-                        <Text style={styles.itemMeta}>
-                          SKU: {item.sku} • Category: {item.categoryName}
-                        </Text>
-                      </View>
-                      <StockStatusBadge status={item.stockStatus} size="sm" />
+            <View style={{ gap: 8 }}>
+              {filteredItems.map((item) => {
+                const statusColor =
+                  item.stockStatus === 'OUT_OF_STOCK'
+                    ? palette.danger600
+                    : item.stockStatus === 'LOW_STOCK'
+                    ? palette.warning600
+                    : palette.success600;
+
+                return (
+                  <TouchableOpacity
+                    key={item.itemKey}
+                    style={styles.itemRowCard}
+                    onPress={() => router.push(`/product/${item.productId}`)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemTitle}>{item.displayName}</Text>
+                      <Text style={styles.itemMeta}>
+                        {item.categoryName} • Min:{' '}
+                        {formatQuantity(item.minStockThreshold, item.unitSymbol)}
+                      </Text>
                     </View>
 
-                    <View style={styles.itemBottomRow}>
-                      <View style={{ gap: 4 }}>
-                        <ProvenanceBadge provenance={item.quantityProvenance} />
-                        <Text style={styles.countDateText}>
-                          Last Physical Count:{' '}
-                          {formatDisplayDate(
-                            item.lastPhysicalCountDate,
-                            profile?.dateFormat
-                          )}
-                        </Text>
-                      </View>
+                    <View style={styles.itemRightCol}>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.qtyBig}>
+                        <Text
+                          style={[styles.qtyValueText, { color: statusColor }]}
+                        >
                           {formatQuantity(
                             item.recordedQuantity,
                             item.unitSymbol
                           )}
                         </Text>
-                        <Text style={styles.thresholdSmall}>
-                          Min Threshold:{' '}
-                          {formatQuantity(
-                            item.minStockThreshold,
-                            item.unitSymbol
-                          )}
-                        </Text>
+                        {item.stockStatus !== 'IN_STOCK' ? (
+                          <Text
+                            style={[
+                              styles.statusSmallLabel,
+                              { color: statusColor },
+                            ]}
+                          >
+                            {item.stockStatus === 'OUT_OF_STOCK'
+                              ? 'Out of stock'
+                              : 'Low stock'}
+                          </Text>
+                        ) : null}
                       </View>
+
+                      <TouchableOpacity
+                        style={styles.quickAddStockBtn}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          router.push({
+                            pathname: '/(tabs)/stock',
+                            params: { tab: 'inward', itemKey: item.itemKey },
+                          });
+                        }}
+                      >
+                        <Feather
+                          name="plus"
+                          size={14}
+                          color={palette.primary600}
+                        />
+                        <Text style={styles.quickAddStockText}>Stock</Text>
+                      </TouchableOpacity>
                     </View>
-                  </SectionCard>
-                </TouchableOpacity>
-              ))}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           )}
         </ScrollView>
@@ -643,116 +562,74 @@ export default function ProductsScreen() {
       {activeSubTab === 'categories' ? (
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.sectionHeaderRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>
-                Manage Shop Categories ({categories.length})
-              </Text>
-              <Text style={styles.itemMeta}>
-                Add new categories, edit names, or remove unwanted categories
-              </Text>
-            </View>
-            <PrimaryButton
-              title="+ Add Category"
+            <Text style={styles.sectionTitle}>Shop Categories</Text>
+            <TouchableOpacity
+              style={styles.addBtn}
               onPress={openCreateCategoryModal}
-            />
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text style={styles.addBtnText}>Add Category</Text>
+            </TouchableOpacity>
           </View>
 
-          <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+          <View style={{ gap: 8, marginTop: spacing.md }}>
             {categories.map((cat) => {
               const count = inventoryItems.filter(
                 (i) => i.categoryId === cat.id
               ).length;
               return (
-                <SectionCard key={cat.id} style={styles.rowBetween}>
-                  <View style={[styles.rowCenter, { flex: 1 }]}>
+                <View key={cat.id} style={styles.itemRowCard}>
+                  <View style={styles.catRowLeft}>
                     <View
                       style={[
                         styles.colorDot,
-                        { backgroundColor: cat.colorHex },
+                        { backgroundColor: cat.colorHex || palette.primary600 },
                       ]}
                     />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.itemTitle}>{cat.name}</Text>
-                      {cat.description ? (
-                        <Text style={styles.itemMeta}>{cat.description}</Text>
-                      ) : null}
-                      <Text style={[styles.itemMeta, { fontWeight: '700' }]}>
-                        {count} SKU{count === 1 ? '' : 's'}
+                      <Text style={styles.itemMeta}>
+                        {count} {count === 1 ? 'item' : 'items'}
+                        {cat.description ? ` • ${cat.description}` : ''}
                       </Text>
                     </View>
                   </View>
-
-                  <View style={styles.catActionsRow}>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
                     <TouchableOpacity
-                      style={styles.catIconBtn}
+                      style={styles.iconActionBtn}
                       onPress={() => openEditCategoryModal(cat)}
-                      accessibilityLabel={`Edit ${cat.name}`}
                     >
                       <Feather
                         name="edit-2"
                         size={15}
                         color={palette.primary600}
                       />
-                      <Text style={styles.catEditBtnText}>Edit</Text>
                     </TouchableOpacity>
-
                     <TouchableOpacity
-                      style={[styles.catIconBtn, styles.catDeleteBtn]}
+                      style={styles.iconActionBtn}
                       onPress={() => {
-                        const fallbackCat = categories.find(
+                        setCatError(null);
+                        const fallback = categories.find(
                           (c) => c.id !== cat.id
                         );
-                        setReassignTargetCatId(fallbackCat?.id || null);
+                        setReassignTargetCatId(fallback?.id || null);
                         setRemovingCategory({
                           id: cat.id,
                           name: cat.name,
                           skuCount: count,
                         });
                       }}
-                      accessibilityLabel={`Remove ${cat.name}`}
                     >
                       <Feather
                         name="trash-2"
                         size={15}
                         color={palette.danger600}
                       />
-                      <Text style={styles.catDeleteBtnText}>Remove</Text>
                     </TouchableOpacity>
                   </View>
-                </SectionCard>
+                </View>
               );
             })}
-          </View>
-        </ScrollView>
-      ) : null}
-
-      {activeSubTab === 'units' ? (
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Units of Measurement</Text>
-            <PrimaryButton
-              title="+ Custom Unit"
-              onPress={() => setShowUnitModal(true)}
-            />
-          </View>
-          <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
-            {units.map((u) => (
-              <SectionCard key={u.id} style={styles.rowBetween}>
-                <View>
-                  <Text style={styles.itemTitle}>
-                    {u.name} ({u.symbol})
-                  </Text>
-                  <Text style={styles.itemMeta}>
-                    {u.allowFractional
-                      ? 'Supports decimal / fractional quantities (e.g., 1.25)'
-                      : 'Whole numbers only'}
-                  </Text>
-                </View>
-                <Text style={styles.badgeCount}>
-                  {u.isCustom ? 'Custom' : 'Standard'}
-                </Text>
-              </SectionCard>
-            ))}
           </View>
         </ScrollView>
       ) : null}
@@ -776,8 +653,8 @@ export default function ProductsScreen() {
               {openDropdown === 'category'
                 ? 'Select Category'
                 : openDropdown === 'product'
-                ? 'Select Product / Saree / Style'
-                : 'Select Size / Variant Type'}
+                ? 'Select Product'
+                : 'Select Size / Type'}
             </Text>
 
             <ScrollView style={{ maxHeight: 340 }}>
@@ -796,7 +673,7 @@ export default function ProductsScreen() {
                     }}
                   >
                     <Text style={styles.dropdownOptionText}>
-                      All Categories ({inventoryItems.length} SKUs)
+                      All Categories ({inventoryItems.length})
                     </Text>
                     {!selectedCategoryId ? (
                       <Feather
@@ -854,9 +731,7 @@ export default function ProductsScreen() {
                       setOpenDropdown(null);
                     }}
                   >
-                    <Text style={styles.dropdownOptionText}>
-                      All Items / Styles
-                    </Text>
+                    <Text style={styles.dropdownOptionText}>All Products</Text>
                     {!selectedProductId ? (
                       <Feather
                         name="check"
@@ -956,50 +831,58 @@ export default function ProductsScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
-              {editingCatId ? 'Edit Category' : 'Create Custom Category'}
+              {editingCatId ? 'Edit Category' : 'Add Category'}
             </Text>
-            {catError ? <Text style={styles.errorText}>{catError}</Text> : null}
-            <Text style={styles.label}>Category Name *</Text>
+            {catError ? (
+              <Text style={styles.errorText}>{catError}</Text>
+            ) : null}
+            <Text style={styles.inputLabel}>Category Name *</Text>
             <TextInput
-              style={styles.input}
-              placeholder="e.g., Ready-Made Dresses, Pants, Nighties, Tops, Sarees"
+              style={styles.modalInput}
+              placeholder="e.g., Sarees, Ready-Made Dresses"
+              placeholderTextColor={palette.slate400}
               value={newCatName}
               onChangeText={setNewCatName}
             />
-            <Text style={styles.label}>Description (Optional)</Text>
+            <Text style={styles.inputLabel}>Description (Optional)</Text>
             <TextInput
-              style={styles.input}
-              placeholder="Optional description"
+              style={styles.modalInput}
+              placeholder="Optional note..."
+              placeholderTextColor={palette.slate400}
               value={newCatDesc}
               onChangeText={setNewCatDesc}
             />
-            <Text style={styles.label}>Category Badge Colour</Text>
-            <View style={[styles.rowCenter, { marginTop: 6, flexWrap: 'wrap' }]}>
+
+            <Text style={styles.inputLabel}>Color Tag</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
               {[
                 '#2563EB',
-                '#0D9488',
                 '#7C3AED',
                 '#DB2777',
-                '#D97706',
+                '#EA580C',
                 '#059669',
-                '#DC2626',
-                '#475569',
+                '#0284C7',
+                '#4F46E5',
+                '#D97706',
               ].map((hex) => (
                 <TouchableOpacity
                   key={hex}
                   onPress={() => setNewCatColor(hex)}
-                  style={[
-                    styles.colorChoiceCircle,
-                    { backgroundColor: hex },
-                    newCatColor === hex && styles.colorChoiceSelected,
-                  ]}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 14,
+                    backgroundColor: hex,
+                    borderWidth: newCatColor === hex ? 3 : 0,
+                    borderColor: palette.slate900,
+                  }}
                 />
               ))}
             </View>
+
             <View style={styles.modalActions}>
-              <PrimaryButton
+              <SecondaryButton
                 title="Cancel"
-                variant="outline"
                 onPress={() => {
                   setEditingCatId(null);
                   setShowCatModal(false);
@@ -1007,7 +890,7 @@ export default function ProductsScreen() {
                 style={{ flex: 1 }}
               />
               <PrimaryButton
-                title={editingCatId ? 'Update Category' : 'Save Category'}
+                title="Save"
                 onPress={handleSaveCategory}
                 style={{ flex: 1 }}
               />
@@ -1016,122 +899,74 @@ export default function ProductsScreen() {
         </View>
       </Modal>
 
-      {/* Remove / Delete Category Confirmation Modal */}
-      <Modal
-        visible={removingCategory !== null}
-        transparent
-        animationType="fade"
-      >
+      {/* Remove Category Confirmation Modal */}
+      <Modal visible={removingCategory !== null} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
-              Remove Category "{removingCategory?.name}"?
+              Remove "{removingCategory?.name}"?
             </Text>
+            {catError ? (
+              <Text style={styles.errorText}>{catError}</Text>
+            ) : null}
+
             {removingCategory && removingCategory.skuCount > 0 ? (
-              <>
+              <View style={{ marginVertical: spacing.sm }}>
                 <Text style={styles.itemMeta}>
-                  This category currently has {removingCategory.skuCount} product
-                  SKU(s). Choose a category below to move those products into
-                  before removing "{removingCategory.name}":
+                  This category has {removingCategory.skuCount} item(s). Choose a
+                  category to move them into:
                 </Text>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    flexWrap: 'wrap',
-                    gap: 6,
-                    marginTop: spacing.sm,
-                  }}
+                <ScrollView
+                  style={{ maxHeight: 180, marginTop: spacing.sm }}
+                  contentContainerStyle={{ gap: 6 }}
                 >
                   {categories
                     .filter((c) => c.id !== removingCategory.id)
-                    .map((c) => {
-                      const active = reassignTargetCatId === c.id;
+                    .map((targetCat) => {
+                      const selected = reassignTargetCatId === targetCat.id;
                       return (
                         <TouchableOpacity
-                          key={c.id}
-                          onPress={() => setReassignTargetCatId(c.id)}
+                          key={targetCat.id}
+                          onPress={() => setReassignTargetCatId(targetCat.id)}
                           style={[
-                            styles.sizePill,
-                            active && styles.sizePillActive,
+                            styles.dropdownOptionRow,
+                            selected && styles.dropdownOptionRowActive,
                           ]}
                         >
-                          <Text
-                            style={[
-                              styles.sizePillText,
-                              active && styles.sizePillTextActive,
-                            ]}
-                          >
-                            {c.name}
+                          <Text style={styles.dropdownOptionText}>
+                            {targetCat.name}
                           </Text>
+                          {selected ? (
+                            <Feather
+                              name="check"
+                              size={16}
+                              color={palette.primary600}
+                            />
+                          ) : null}
                         </TouchableOpacity>
                       );
                     })}
-                </View>
-              </>
+                </ScrollView>
+              </View>
             ) : (
-              <Text style={styles.itemMeta}>
-                This category has 0 products and will be permanently removed from
-                your list.
+              <Text style={[styles.itemMeta, { marginVertical: spacing.sm }]}>
+                This category has no products and will be removed.
               </Text>
             )}
 
             <View style={styles.modalActions}>
-              <PrimaryButton
+              <SecondaryButton
                 title="Cancel"
-                variant="outline"
-                onPress={() => setRemovingCategory(null)}
+                onPress={() => {
+                  setRemovingCategory(null);
+                  setReassignTargetCatId(null);
+                }}
                 style={{ flex: 1 }}
               />
               <PrimaryButton
-                title="Confirm Remove"
+                title="Remove"
                 variant="danger"
                 onPress={handleConfirmRemoveCategory}
-                style={{ flex: 1 }}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* New Unit Modal */}
-      <Modal visible={showUnitModal} transparent animationType="slide">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Add Unit of Measurement</Text>
-            {unitError ? (
-              <Text style={styles.errorText}>{unitError}</Text>
-            ) : null}
-            <Text style={styles.label}>Unit Name *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., Pieces, Sets, Metres"
-              value={newUnitName}
-              onChangeText={setNewUnitName}
-            />
-            <Text style={styles.label}>Short Symbol *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., pcs, sets, m"
-              value={newUnitSymbol}
-              onChangeText={setNewUnitSymbol}
-            />
-            <View style={[styles.rowBetween, { marginTop: spacing.md }]}>
-              <Text style={styles.label}>Allow Fractional Quantities?</Text>
-              <Switch
-                value={newUnitFractional}
-                onValueChange={setNewUnitFractional}
-              />
-            </View>
-            <View style={styles.modalActions}>
-              <PrimaryButton
-                title="Cancel"
-                variant="outline"
-                onPress={() => setShowUnitModal(false)}
-                style={{ flex: 1 }}
-              />
-              <PrimaryButton
-                title="Save Unit"
-                onPress={handleCreateUnit}
                 style={{ flex: 1 }}
               />
             </View>
@@ -1151,7 +986,7 @@ function getStyles() {
     subTabBar: {
       flexDirection: 'row',
       backgroundColor: palette.white,
-      paddingHorizontal: spacing.md,
+      paddingHorizontal: spacing.lg,
       paddingVertical: 8,
       borderBottomWidth: 1,
       borderBottomColor: palette.slate200,
@@ -1168,7 +1003,7 @@ function getStyles() {
       backgroundColor: palette.primary600,
     },
     subTabText: {
-      fontSize: 12,
+      fontSize: 13,
       fontWeight: '700',
       color: palette.slate700,
     },
@@ -1176,12 +1011,12 @@ function getStyles() {
       color: '#FFFFFF',
     },
     scrollContent: {
-      padding: spacing.lg,
+      padding: spacing.md,
       paddingBottom: 36,
     },
     topRow: {
       flexDirection: 'row',
-      gap: spacing.sm,
+      gap: spacing.xs,
       marginBottom: spacing.sm,
     },
     searchBox: {
@@ -1190,26 +1025,16 @@ function getStyles() {
       alignItems: 'center',
       backgroundColor: palette.white,
       borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: palette.slate300,
       paddingHorizontal: spacing.md,
+      borderWidth: 1,
+      borderColor: palette.slate200,
       gap: spacing.xs,
-      height: 44,
     },
     searchInput: {
       flex: 1,
-      fontSize: 13,
+      paddingVertical: 9,
+      fontSize: 14,
       color: palette.slate900,
-    },
-    scanBtn: {
-      width: 44,
-      height: 44,
-      borderRadius: radius.md,
-      backgroundColor: palette.white,
-      borderWidth: 1,
-      borderColor: palette.slate300,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     addBtn: {
       flexDirection: 'row',
@@ -1217,48 +1042,38 @@ function getStyles() {
       gap: 4,
       backgroundColor: palette.primary600,
       paddingHorizontal: 14,
+      paddingVertical: 9,
       borderRadius: radius.md,
-      height: 44,
+      justifyContent: 'center',
     },
     addBtnText: {
       color: '#FFFFFF',
       fontWeight: '700',
       fontSize: 13,
     },
-    quickFilterCard: {
-      padding: spacing.md,
-      marginBottom: spacing.sm,
-    },
-    quickFilterHeader: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: palette.slate700,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
-    },
-    clearFilterText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: palette.primary600,
+    filterContainer: {
+      backgroundColor: palette.white,
+      borderRadius: radius.md,
+      padding: spacing.sm,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+      marginBottom: spacing.md,
     },
     dropdownRow: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.xs,
-      marginTop: spacing.xs,
+      gap: 6,
     },
     dropdownSelector: {
       flex: 1,
-      minWidth: 130,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      backgroundColor: palette.slate50,
-      borderWidth: 1,
-      borderColor: palette.slate300,
-      borderRadius: radius.md,
       paddingHorizontal: 10,
       paddingVertical: 7,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+      backgroundColor: palette.slate50,
     },
     dropdownSelectorActive: {
       borderColor: palette.primary600,
@@ -1270,17 +1085,17 @@ function getStyles() {
       color: palette.slate500,
     },
     dropdownValue: {
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: '700',
       color: palette.slate900,
       marginTop: 1,
     },
     sizePill: {
       paddingVertical: 5,
-      paddingHorizontal: 12,
+      paddingHorizontal: 11,
       borderRadius: radius.pill,
       borderWidth: 1,
-      borderColor: palette.slate300,
+      borderColor: palette.slate200,
       backgroundColor: palette.slate50,
     },
     sizePillActive: {
@@ -1295,102 +1110,101 @@ function getStyles() {
     sizePillTextActive: {
       color: '#FFFFFF',
     },
+    statusFilterRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: 1,
+      borderTopColor: palette.slate100,
+    },
     filterChip: {
-      paddingVertical: 6,
-      paddingHorizontal: 12,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
       borderRadius: radius.pill,
-      backgroundColor: palette.white,
-      borderWidth: 1,
-      borderColor: palette.slate300,
+      backgroundColor: palette.slate100,
     },
     filterChipActive: {
-      backgroundColor: palette.primary600,
-      borderColor: palette.primary600,
+      backgroundColor: palette.navy900,
     },
     filterChipText: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: palette.slate700,
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.slate600,
     },
     filterChipTextActive: {
-      color: '#FFFFFF',
+      color: palette.white,
     },
     sortChip: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      paddingVertical: 6,
-      paddingHorizontal: 12,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
       borderRadius: radius.pill,
       backgroundColor: palette.primary50,
-      borderWidth: 1,
-      borderColor: palette.primary100,
     },
     sortChipText: {
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: '700',
       color: palette.primary600,
     },
-    itemCard: {
-      padding: spacing.md,
+    clearFilterText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.danger600,
     },
-    itemTopRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'flex-start',
-      gap: spacing.sm,
-    },
-    titleWithSizeRow: {
+    itemRowCard: {
       flexDirection: 'row',
       alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: 6,
+      justifyContent: 'space-between',
+      backgroundColor: palette.white,
+      borderRadius: radius.md,
+      paddingVertical: 12,
+      paddingHorizontal: spacing.md,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+      ...shadows.card,
     },
     itemTitle: {
-      fontSize: 15,
+      fontSize: 14,
       fontWeight: '700',
       color: palette.slate900,
-    },
-    sizeTagBadge: {
-      backgroundColor: palette.primary50,
-      borderWidth: 1,
-      borderColor: palette.primary100,
-      paddingHorizontal: 8,
-      paddingVertical: 2,
-      borderRadius: radius.sm,
-    },
-    sizeTagText: {
-      fontSize: 12,
-      fontWeight: '800',
-      color: palette.primary600,
     },
     itemMeta: {
       fontSize: 12,
       color: palette.slate500,
       marginTop: 2,
     },
-    itemBottomRow: {
+    itemRightCol: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'flex-end',
-      marginTop: spacing.md,
-      paddingTop: spacing.sm,
-      borderTopWidth: 1,
-      borderTopColor: palette.slate100,
+      alignItems: 'center',
+      gap: 10,
     },
-    countDateText: {
-      fontSize: 11,
-      color: palette.slate500,
-    },
-    qtyBig: {
-      fontSize: 18,
+    qtyValueText: {
+      fontSize: 15,
       fontWeight: '800',
-      color: palette.slate900,
     },
-    thresholdSmall: {
-      fontSize: 11,
-      color: palette.slate500,
-      marginTop: 2,
+    statusSmallLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    quickAddStockBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: radius.sm,
+      backgroundColor: palette.primary50,
+      borderWidth: 1,
+      borderColor: palette.primary100,
+    },
+    quickAddStockText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.primary600,
     },
     sectionHeaderRow: {
       flexDirection: 'row',
@@ -1402,76 +1216,32 @@ function getStyles() {
       fontWeight: '700',
       color: palette.slate900,
     },
-    rowBetween: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    rowCenter: {
+    catRowLeft: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: spacing.md,
+      gap: spacing.sm,
+      flex: 1,
     },
     colorDot: {
-      width: 14,
-      height: 14,
-      borderRadius: 7,
+      width: 12,
+      height: 12,
+      borderRadius: 6,
     },
-    badgeCount: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: palette.slate600,
-      backgroundColor: palette.slate100,
-      paddingVertical: 4,
-      paddingHorizontal: 10,
-      borderRadius: radius.pill,
-    },
-    catActionsRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    catIconBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingVertical: 6,
-      paddingHorizontal: 10,
-      borderRadius: radius.md,
-      backgroundColor: palette.primary50,
+    iconActionBtn: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.sm,
+      backgroundColor: palette.slate50,
       borderWidth: 1,
-      borderColor: palette.primary100,
-    },
-    catDeleteBtn: {
-      backgroundColor: palette.danger50,
-      borderColor: palette.danger100,
-    },
-    catEditBtnText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: palette.primary600,
-    },
-    catDeleteBtnText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: palette.danger600,
-    },
-    colorChoiceCircle: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      borderWidth: 2,
-      borderColor: 'transparent',
-    },
-    colorChoiceSelected: {
-      borderColor: palette.slate900,
-      transform: [{ scale: 1.12 }],
+      borderColor: palette.slate200,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     modalBackdrop: {
       flex: 1,
       backgroundColor: 'rgba(15, 23, 42, 0.55)',
       justifyContent: 'center',
-      padding: spacing.lg,
+      padding: spacing.xl,
     },
     modalCard: {
       backgroundColor: palette.white,
@@ -1482,12 +1252,17 @@ function getStyles() {
       backgroundColor: palette.white,
       borderRadius: radius.lg,
       padding: spacing.lg,
-      maxHeight: 420,
+    },
+    modalTitle: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: palette.slate900,
+      marginBottom: spacing.sm,
     },
     dropdownOptionRow: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
+      justifyContent: 'space-between',
       paddingVertical: 12,
       paddingHorizontal: spacing.md,
       borderRadius: radius.md,
@@ -1502,20 +1277,14 @@ function getStyles() {
       fontWeight: '600',
       color: palette.slate900,
     },
-    modalTitle: {
-      fontSize: 17,
-      fontWeight: '800',
-      color: palette.slate900,
-      marginBottom: spacing.sm,
-    },
-    label: {
+    inputLabel: {
       fontSize: 13,
       fontWeight: '600',
       color: palette.slate700,
-      marginTop: spacing.sm,
+      marginTop: spacing.md,
       marginBottom: 4,
     },
-    input: {
+    modalInput: {
       borderWidth: 1,
       borderColor: palette.slate300,
       borderRadius: radius.md,
@@ -1523,17 +1292,18 @@ function getStyles() {
       paddingVertical: 10,
       fontSize: 14,
       color: palette.slate900,
+      backgroundColor: palette.slate50,
     },
     modalActions: {
       flexDirection: 'row',
-      gap: spacing.sm,
-      marginTop: spacing.lg,
+      gap: spacing.md,
+      marginTop: spacing.xl,
     },
     errorText: {
       color: palette.danger600,
       fontSize: 12,
       fontWeight: '600',
-      marginBottom: spacing.xs,
+      marginBottom: 4,
     },
   });
 }

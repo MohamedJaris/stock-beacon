@@ -80,7 +80,7 @@ export default function TabsLayout() {
         name="products"
         options={{
           title: 'Products',
-          headerTitle: 'Products & Catalog',
+          headerTitle: 'Products',
           tabBarIcon: ({ color, size }) => (
             <Feather name="package" size={size} color={color} />
           ),
@@ -90,7 +90,7 @@ export default function TabsLayout() {
         name="stock"
         options={{
           title: 'Stock',
-          headerTitle: 'Stock Operations & Ledger',
+          headerTitle: 'Stock',
           tabBarIcon: ({ color, size }) => (
             <Feather name="layers" size={size} color={color} />
           ),
@@ -100,7 +100,7 @@ export default function TabsLayout() {
         name="reports"
         options={{
           title: 'Reports',
-          headerTitle: 'Historical & Low-Stock Reports',
+          headerTitle: 'Reports',
           tabBarIcon: ({ color, size }) => (
             <Feather name="bar-chart-2" size={size} color={color} />
           ),
@@ -110,7 +110,7 @@ export default function TabsLayout() {
         name="settings"
         options={{
           title: 'Settings',
-          headerTitle: 'Workspace, Backup & Settings',
+          headerTitle: 'Settings',
           tabBarIcon: ({ color, size }) => (
             <Feather name="settings" size={size} color={color} />
           ),

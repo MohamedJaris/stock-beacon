@@ -3,20 +3,15 @@ import {
   buildCurrentInventoryCsv,
   buildDailyLowStockCsv,
   buildHtmlReportForPdf,
-  buildStockEventsCsv,
   exportAndShareReportFile,
   formatProvenanceLabel,
   formatStockStatusLabel,
 } from '@/application/services/ReportExportService';
 import {
   EmptyStateView,
-  PrimaryButton,
   SectionCard,
 } from '@/components/common/AppComponents';
-import {
-  ProvenanceBadge,
-  StockStatusBadge,
-} from '@/components/inventory/StatusBadge';
+import { StockStatusBadge } from '@/components/inventory/StatusBadge';
 import {
   addDays,
   formatDisplayDate,
@@ -38,7 +33,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ScrollView,
-  Switch,
   StyleSheet,
   Text,
   TextInput,
@@ -49,10 +43,7 @@ import {
 type ReportMode =
   | 'daily_low_stock'
   | 'consolidated_low_stock'
-  | 'current_inventory'
-  | 'inward_register'
-  | 'physical_counts'
-  | 'adjustments';
+  | 'current_inventory';
 
 export default function ReportsScreen() {
   const styles = getStyles();
@@ -66,13 +57,12 @@ export default function ReportsScreen() {
   const today = getTodayInTimezone(profile?.timezone || 'Asia/Kolkata');
 
   const [reportMode, setReportMode] = useState<ReportMode>('daily_low_stock');
+  const [presetDays, setPresetDays] = useState<number | 'custom'>(4);
   const [startDate, setStartDate] = useState(addDays(today, -4));
   const [endDate, setEndDate] = useState(today);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
     null
   );
-  const [searchQuery, setSearchQuery] = useState('');
-  const [includeAllDailyStatuses, setIncludeAllDailyStatuses] = useState(false);
 
   const [dailyReport, setDailyReport] =
     useState<DailyLowStockReportResult | null>(null);
@@ -87,13 +77,11 @@ export default function ReportsScreen() {
     if (!profile) return;
     setDateError(null);
     if (!isValidIsoDate(startDate) || !isValidIsoDate(endDate)) {
-      setDateError('Please enter valid dates in YYYY-MM-DD format.');
+      setDateError('Enter valid dates in YYYY-MM-DD format.');
       return;
     }
     if (startDate > endDate) {
-      setDateError(
-        `Start date (${startDate}) cannot be later than end date (${endDate}).`
-      );
+      setDateError('Start date cannot be after end date.');
       return;
     }
 
@@ -107,22 +95,21 @@ export default function ReportsScreen() {
           startDate,
           endDate,
           categoryId: selectedCategoryId,
-          searchQuery,
-          includeAllStatuses: includeAllDailyStatuses,
+          searchQuery: '',
+          includeAllStatuses: false,
         }),
         invRepo.getConsolidatedLowStockReport({
           workspaceId: profile.id,
           startDate,
           endDate,
           categoryId: selectedCategoryId,
-          searchQuery,
+          searchQuery: '',
         }),
       ]);
 
       setDailyReport(daily);
       setConsolidatedReport(consolidated);
 
-      // Expand all dates with items by default
       const initialExpanded: Record<string, boolean> = {};
       for (const d of daily.days) {
         initialExpanded[d.date] = true;
@@ -131,20 +118,14 @@ export default function ReportsScreen() {
     } catch (err) {
       setDateError((err as Error).message);
     }
-  }, [
-    profile,
-    startDate,
-    endDate,
-    selectedCategoryId,
-    searchQuery,
-    includeAllDailyStatuses,
-  ]);
+  }, [profile, startDate, endDate, selectedCategoryId]);
 
   useEffect(() => {
     runHistoricalQuery();
   }, [runHistoricalQuery, inventoryItems, recentEvents]);
 
   const applyDatePreset = (daysBack: number) => {
+    setPresetDays(daysBack);
     setStartDate(addDays(today, -daysBack));
     setEndDate(today);
   };
@@ -174,24 +155,22 @@ export default function ReportsScreen() {
       }
       const html = buildHtmlReportForPdf({
         business: profile,
-        reportTitle: includeAllDailyStatuses
-          ? 'Daily Stock History Report'
-          : 'Daily Low-Stock History Report',
-        dateRangeLabel: `${startDate} to ${endDate} (Inclusive)`,
+        reportTitle: 'Daily Low-Stock Report',
+        dateRangeLabel: `${startDate} to ${endDate}`,
         headers: [
           'Date',
-          'Product / Variant',
+          'Product',
           'SKU',
           'Quantity',
-          'Historical Minimum',
+          'Minimum',
           'Status',
-          'Quantity Source',
+          'Source',
         ],
         rows,
       });
       await exportAndShareReportFile({
         format,
-        fileNamePrefix: 'daily_low_stock_history',
+        fileNamePrefix: 'daily_low_stock',
         csvContent: csv,
         htmlContent: html,
       });
@@ -203,15 +182,15 @@ export default function ReportsScreen() {
       const html = buildHtmlReportForPdf({
         business: profile,
         reportTitle: 'Consolidated Low-Stock Report',
-        dateRangeLabel: `${startDate} to ${endDate} (Inclusive)`,
+        dateRangeLabel: `${startDate} to ${endDate}`,
         headers: [
-          'Product / Variant',
+          'Product',
           'SKU',
           'Category',
           'Minimum',
           'Lowest Qty',
-          'Low-Stock Days',
-          'Out-of-Stock Days',
+          'Low Days',
+          'Out Days',
           'First Date',
           'Last Date',
         ],
@@ -229,7 +208,7 @@ export default function ReportsScreen() {
       });
       await exportAndShareReportFile({
         format,
-        fileNamePrefix: 'consolidated_low_stock_report',
+        fileNamePrefix: 'consolidated_low_stock',
         csvContent: csv,
         htmlContent: html,
       });
@@ -244,16 +223,16 @@ export default function ReportsScreen() {
       );
       const html = buildHtmlReportForPdf({
         business: profile,
-        reportTitle: 'Current Inventory & Category Report',
+        reportTitle: 'Current Inventory Report',
         dateRangeLabel: `As of ${today}`,
         headers: [
-          'Product / Variant',
+          'Product',
           'SKU',
           'Category',
-          'Recorded Qty',
+          'Stock',
           'Minimum',
           'Status',
-          'Provenance',
+          'Source',
         ],
         rows: inventoryItems.map((i) => [
           i.displayName,
@@ -267,96 +246,22 @@ export default function ReportsScreen() {
       });
       await exportAndShareReportFile({
         format,
-        fileNamePrefix: 'current_inventory_report',
+        fileNamePrefix: 'current_inventory',
         csvContent: csv,
         htmlContent: html,
       });
-      return;
     }
-
-    // Event-based reports (inward, physical count, adjustments)
-    const targetType =
-      reportMode === 'inward_register'
-        ? 'STOCK_INWARD'
-        : reportMode === 'physical_counts'
-        ? 'PHYSICAL_COUNT'
-        : 'STOCK_ADJUSTMENT';
-    const filteredEvents = recentEvents.filter(
-      (e) =>
-        e.eventType === targetType &&
-        e.eventDate >= startDate &&
-        e.eventDate <= endDate
-    );
-    const title =
-      reportMode === 'inward_register'
-        ? 'Stock Inward Report'
-        : reportMode === 'physical_counts'
-        ? 'Physical Stock-Count Report'
-        : 'Stock Adjustment Report';
-
-    const csv = buildStockEventsCsv(
-      profile,
-      filteredEvents,
-      title,
-      `${startDate} to ${endDate}`
-    );
-    const html = buildHtmlReportForPdf({
-      business: profile,
-      reportTitle: title,
-      dateRangeLabel: `${startDate} to ${endDate}`,
-      headers: [
-        'Date',
-        'Product / Variant',
-        'SKU',
-        'Quantity / Count',
-        'Resulting Balance',
-        'Variance / Reference',
-      ],
-      rows: filteredEvents.map((e) => [
-        e.eventDate,
-        e.displayName,
-        e.sku,
-        formatQuantity(e.quantity, e.unitSymbol),
-        formatQuantity(e.resultingBalance, e.unitSymbol),
-        e.varianceQuantity !== null
-          ? `Variance: ${e.varianceQuantity}`
-          : e.referenceNumber || e.reason || '-',
-      ]),
-    });
-    await exportAndShareReportFile({
-      format,
-      fileNamePrefix: reportMode,
-      csvContent: csv,
-      htmlContent: html,
-    });
   };
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.scrollContent}
-    >
-      {/* Report Mode Selector */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ marginBottom: spacing.md }}
-        contentContainerStyle={{ gap: spacing.xs }}
-      >
+    <View style={styles.screen}>
+      {/* Clean 3-Tab Segmented Bar */}
+      <View style={styles.tabBar}>
         {(
           [
-            {
-              key: 'daily_low_stock',
-              label: 'Report A: Daily Low-Stock History',
-            },
-            {
-              key: 'consolidated_low_stock',
-              label: 'Report B: Consolidated Low-Stock',
-            },
-            { key: 'current_inventory', label: 'Current & Category Inventory' },
-            { key: 'inward_register', label: 'Stock Inward Report' },
-            { key: 'physical_counts', label: 'Physical Count Report' },
-            { key: 'adjustments', label: 'Stock Adjustment Report' },
+            { key: 'daily_low_stock', label: 'Daily Low' },
+            { key: 'consolidated_low_stock', label: 'Summary' },
+            { key: 'current_inventory', label: 'All Stock' },
           ] as { key: ReportMode; label: string }[]
         ).map((m) => {
           const active = reportMode === m.key;
@@ -364,420 +269,352 @@ export default function ReportsScreen() {
             <TouchableOpacity
               key={m.key}
               onPress={() => setReportMode(m.key)}
-              style={[styles.modeTab, active && styles.modeTabActive]}
+              style={[styles.tabBtn, active && styles.tabBtnActive]}
             >
               <Text
-                style={[styles.modeTabText, active && styles.modeTabTextActive]}
+                style={[styles.tabText, active && styles.tabTextActive]}
               >
                 {m.label}
               </Text>
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+      </View>
 
-      {/* Date Range & Filter Controls */}
-      <SectionCard style={styles.section}>
-        <Text style={styles.sectionTitle}>
-          Inclusive Date Range & Report Filters
-        </Text>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* Compact Filter & Export Bar */}
+        <View style={styles.filterCard}>
+          {reportMode !== 'current_inventory' ? (
+            <>
+              <View style={styles.rowBetween}>
+                <View style={styles.presetRow}>
+                  {[
+                    { days: 0, label: 'Today' },
+                    { days: 4, label: '5 Days' },
+                    { days: 6, label: '7 Days' },
+                    { days: 29, label: '30 Days' },
+                  ].map((p) => {
+                    const active = presetDays === p.days;
+                    return (
+                      <TouchableOpacity
+                        key={p.label}
+                        style={[
+                          styles.presetChip,
+                          active && styles.presetChipActive,
+                        ]}
+                        onPress={() => applyDatePreset(p.days)}
+                      >
+                        <Text
+                          style={[
+                            styles.presetChipText,
+                            active && styles.presetChipTextActive,
+                          ]}
+                        >
+                          {p.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  <TouchableOpacity
+                    style={[
+                      styles.presetChip,
+                      presetDays === 'custom' && styles.presetChipActive,
+                    ]}
+                    onPress={() => setPresetDays('custom')}
+                  >
+                    <Text
+                      style={[
+                        styles.presetChipText,
+                        presetDays === 'custom' && styles.presetChipTextActive,
+                      ]}
+                    >
+                      Custom
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
-        {dateError ? (
-          <View style={styles.errorBanner}>
-            <Feather name="alert-circle" size={15} color={palette.danger700} />
-            <Text style={styles.errorText}>{dateError}</Text>
-          </View>
-        ) : null}
+              {presetDays === 'custom' ? (
+                <View style={[styles.row, { marginTop: spacing.sm }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>From</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={startDate}
+                      onChangeText={setStartDate}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>To</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={endDate}
+                      onChangeText={setEndDate}
+                    />
+                  </View>
+                </View>
+              ) : null}
 
-        <View style={styles.row}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Start Date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={startDate}
-              onChangeText={setStartDate}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>End Date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={endDate}
-              onChangeText={setEndDate}
-            />
-          </View>
-        </View>
+              {dateError ? (
+                <Text style={styles.errorText}>{dateError}</Text>
+              ) : null}
+            </>
+          ) : null}
 
-        <View style={styles.presetRow}>
-          <TouchableOpacity
-            style={styles.presetChip}
-            onPress={() => applyDatePreset(4)}
-          >
-            <Text style={styles.presetChipText}>Last 5 Days</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.presetChip}
-            onPress={() => applyDatePreset(6)}
-          >
-            <Text style={styles.presetChipText}>Last 7 Days</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.presetChip}
-            onPress={() => applyDatePreset(29)}
-          >
-            <Text style={styles.presetChipText}>Last 30 Days</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TextInput
-          style={[styles.input, { marginTop: spacing.sm }]}
-          placeholder="Filter by product name or SKU..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ marginTop: spacing.sm }}
-          contentContainerStyle={{ gap: spacing.xs }}
-        >
-          <TouchableOpacity
-            onPress={() => setSelectedCategoryId(null)}
-            style={[
-              styles.presetChip,
-              !selectedCategoryId && styles.presetChipActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.presetChipText,
-                !selectedCategoryId && styles.presetChipTextActive,
-              ]}
+          <View style={styles.categoryAndExportRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ gap: 6 }}
             >
-              All Categories
-            </Text>
-          </TouchableOpacity>
-          {categories.map((cat) => {
-            const active = selectedCategoryId === cat.id;
-            return (
               <TouchableOpacity
-                key={cat.id}
-                onPress={() => setSelectedCategoryId(active ? null : cat.id)}
-                style={[styles.presetChip, active && styles.presetChipActive]}
+                onPress={() => setSelectedCategoryId(null)}
+                style={[
+                  styles.catChip,
+                  !selectedCategoryId && styles.catChipActive,
+                ]}
               >
                 <Text
                   style={[
-                    styles.presetChipText,
-                    active && styles.presetChipTextActive,
+                    styles.catChipText,
+                    !selectedCategoryId && styles.catChipTextActive,
                   ]}
                 >
-                  {cat.name}
+                  All Categories
                 </Text>
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+              {categories.map((c) => {
+                const active = selectedCategoryId === c.id;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    onPress={() =>
+                      setSelectedCategoryId(active ? null : c.id)
+                    }
+                    style={[styles.catChip, active && styles.catChipActive]}
+                  >
+                    <Text
+                      style={[
+                        styles.catChipText,
+                        active && styles.catChipTextActive,
+                      ]}
+                    >
+                      {c.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
-        {reportMode === 'daily_low_stock' ? (
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>
-              Show In-Stock Products Also (Full Daily Stock History)
-            </Text>
-            <Switch
-              value={includeAllDailyStatuses}
-              onValueChange={setIncludeAllDailyStatuses}
-            />
+            <View style={{ flexDirection: 'row', gap: 6, marginLeft: 8 }}>
+              <TouchableOpacity
+                style={styles.exportChip}
+                onPress={() => handleExport('csv')}
+              >
+                <Feather name="download" size={13} color={palette.primary600} />
+                <Text style={styles.exportChipText}>CSV</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.exportChip}
+                onPress={() => handleExport('pdf')}
+              >
+                <Feather name="file-text" size={13} color={palette.primary600} />
+                <Text style={styles.exportChipText}>PDF</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* ================================================================
+            TAB 1: DAILY LOW-STOCK HISTORY
+           ================================================================ */}
+        {reportMode === 'daily_low_stock' && dailyReport ? (
+          <View style={{ gap: spacing.sm }}>
+            {dailyReport.days.map((dayGroup) => {
+              const isOpen = Boolean(expandedDates[dayGroup.date]);
+              return (
+                <SectionCard key={dayGroup.date}>
+                  <TouchableOpacity
+                    style={styles.dayHeaderRow}
+                    onPress={() =>
+                      setExpandedDates((prev) => ({
+                        ...prev,
+                        [dayGroup.date]: !prev[dayGroup.date],
+                      }))
+                    }
+                  >
+                    <View>
+                      <Text style={styles.dayTitle}>
+                        {formatReadableDate(dayGroup.date)}
+                      </Text>
+                      <Text style={styles.daySubtitle}>
+                        {dayGroup.lowStockCount} Low • {dayGroup.outOfStockCount}{' '}
+                        Out of Stock
+                      </Text>
+                    </View>
+                    <Feather
+                      name={isOpen ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={palette.slate600}
+                    />
+                  </TouchableOpacity>
+
+                  {isOpen ? (
+                    dayGroup.items.length === 0 ? (
+                      <Text style={styles.emptyDayNote}>
+                        All items were above minimum stock on this date.
+                      </Text>
+                    ) : (
+                      <View style={{ gap: 6, marginTop: spacing.sm }}>
+                        {dayGroup.items.map((item) => (
+                          <TouchableOpacity
+                            key={`${dayGroup.date}_${item.itemKey}`}
+                            style={styles.reportItemRow}
+                            onPress={() =>
+                              router.push(`/product/${item.productId}`)
+                            }
+                          >
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.itemTitle}>
+                                {item.displayName}
+                              </Text>
+                              <Text style={styles.itemSub}>
+                                {item.categoryName} • Min:{' '}
+                                {formatQuantity(
+                                  item.minStockThreshold,
+                                  item.unitSymbol
+                                )}
+                              </Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                              <Text style={styles.qtyBold}>
+                                {formatQuantity(
+                                  item.recordedQuantity,
+                                  item.unitSymbol
+                                )}
+                              </Text>
+                              <StockStatusBadge
+                                status={item.stockStatus}
+                                size="sm"
+                              />
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )
+                  ) : null}
+                </SectionCard>
+              );
+            })}
           </View>
         ) : null}
 
-        <View style={styles.exportRow}>
-          <PrimaryButton
-            title="Export CSV"
-            variant="outline"
-            icon="download"
-            onPress={() => handleExport('csv')}
-            style={{ flex: 1 }}
-          />
-          <PrimaryButton
-            title="Export PDF"
-            variant="secondary"
-            icon="file-text"
-            onPress={() => handleExport('pdf')}
-            style={{ flex: 1 }}
-          />
-        </View>
-      </SectionCard>
-
-      {/* ================================================================
-          REPORT A: DAILY LOW-STOCK HISTORY
-         ================================================================ */}
-      {reportMode === 'daily_low_stock' && dailyReport ? (
-        <View style={{ gap: spacing.sm }}>
-          {dailyReport.days.map((day) => {
-            const isExpanded = Boolean(expandedDates[day.date]);
-            return (
-              <SectionCard key={day.date} style={{ padding: spacing.md }}>
-                <TouchableOpacity
-                  style={styles.dayHeader}
-                  onPress={() =>
-                    setExpandedDates((prev) => ({
-                      ...prev,
-                      [day.date]: !prev[day.date],
-                    }))
-                  }
-                >
-                  <View>
-                    <Text style={styles.dayTitle}>
-                      {formatReadableDate(day.date)} ({day.date})
-                    </Text>
-                    <Text style={styles.daySubtitle}>
-                      {day.totalLowOrOutCount} Low/Out-of-Stock •{' '}
-                      {day.items.length} shown
-                    </Text>
-                  </View>
-                  <Feather
-                    name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                    size={18}
-                    color={palette.slate600}
-                  />
-                </TouchableOpacity>
-
-                {isExpanded ? (
-                  <View style={{ marginTop: spacing.sm, gap: spacing.xs }}>
-                    {day.items.length === 0 ? (
-                      <Text style={styles.emptyDayText}>
-                        No products were below their applicable minimum stock threshold at the end of {day.date}.
-                      </Text>
-                    ) : (
-                      day.items.map((item) => (
-                        <TouchableOpacity
-                          key={`${day.date}:${item.itemKey}`}
-                          style={styles.reportItemRow}
-                          onPress={() =>
-                            router.push(`/product/${item.productId}`)
-                          }
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.itemTitle}>
-                              {item.displayName}
-                            </Text>
-                            <Text style={styles.itemSub}>
-                              SKU: {item.sku} • {item.categoryName}
-                            </Text>
-                            <View style={{ marginTop: 4 }}>
-                              <ProvenanceBadge
-                                provenance={item.quantitySource}
-                              />
-                            </View>
-                          </View>
-                          <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                            <StockStatusBadge
-                              status={item.stockStatus}
-                              size="sm"
-                            />
-                            <Text style={styles.qtyText}>
-                              Qty:{' '}
-                              {formatQuantity(
-                                item.recordedQuantity,
-                                item.unitSymbol
-                              )}
-                            </Text>
-                            <Text style={styles.itemSub}>
-                              Min on {day.date}:{' '}
-                              {formatQuantity(
-                                item.minStockThreshold,
-                                item.unitSymbol
-                              )}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))
-                    )}
-                  </View>
-                ) : null}
-              </SectionCard>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {/* ================================================================
-          REPORT B: CONSOLIDATED LOW-STOCK REPORT
-         ================================================================ */}
-      {reportMode === 'consolidated_low_stock' && consolidatedReport ? (
-        <View style={{ gap: spacing.sm }}>
+        {/* ================================================================
+            TAB 2: CONSOLIDATED LOW-STOCK SUMMARY
+           ================================================================ */}
+        {reportMode === 'consolidated_low_stock' && consolidatedReport ? (
           <SectionCard>
-            <Text style={styles.sectionTitle}>
-              Consolidated Low-Stock Summary ({consolidatedReport.items.length}{' '}
-              Unique SKUs)
-            </Text>
-            <Text style={styles.daySubtitle}>
-              Each unique product/variant that entered LOW_STOCK or OUT_OF_STOCK between {startDate} and {endDate} appears exactly once.
-            </Text>
-
             {consolidatedReport.items.length === 0 ? (
-              <View style={{ marginTop: spacing.md }}>
-                <EmptyStateView
-                  icon="check-circle"
-                  title="Zero Low-Stock Occurrences in Period"
-                  message={`No products entered low-stock or out-of-stock status between ${startDate} and ${endDate}.`}
-                />
-              </View>
+              <EmptyStateView
+                icon="check-circle"
+                title="No Low-Stock Items"
+                message="No items fell below minimum stock during this period."
+              />
             ) : (
-              <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+              <View style={{ gap: 8 }}>
                 {consolidatedReport.items.map((item) => (
                   <TouchableOpacity
                     key={item.itemKey}
-                    style={styles.consolidatedCard}
+                    style={styles.reportItemRow}
                     onPress={() => router.push(`/product/${item.productId}`)}
                   >
-                    <View style={styles.dayHeader}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.itemTitle}>{item.displayName}</Text>
-                        <Text style={styles.itemSub}>
-                          SKU: {item.sku} • Category: {item.categoryName}
-                        </Text>
-                      </View>
-                      <View style={styles.daysBadge}>
-                        <Text style={styles.daysBadgeText}>
-                          {item.totalAffectedDays} Affected Day
-                          {item.totalAffectedDays === 1 ? '' : 's'}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.statsGrid}>
-                      <View>
-                        <Text style={styles.statLabel}>Lowest Qty</Text>
-                        <Text style={styles.statValue}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemTitle}>{item.displayName}</Text>
+                      <Text style={styles.itemSub}>
+                        {item.categoryName} • Lowest:{' '}
+                        <Text style={styles.qtyBold}>
                           {formatQuantity(
                             item.lowestRecordedQuantity,
                             item.unitSymbol
                           )}
-                        </Text>
-                      </View>
-                      <View>
-                        <Text style={styles.statLabel}>Threshold</Text>
-                        <Text style={styles.statValue}>
-                          {formatQuantity(
-                            item.applicableThreshold,
-                            item.unitSymbol
-                          )}
-                        </Text>
-                      </View>
-                      <View>
-                        <Text style={styles.statLabel}>Low-Stock Days</Text>
-                        <Text style={styles.statValue}>{item.lowStockDays}</Text>
-                      </View>
-                      <View>
-                        <Text style={styles.statLabel}>Out-of-Stock Days</Text>
-                        <Text style={styles.statValue}>
-                          {item.outOfStockDays}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={[styles.dayHeader, { marginTop: spacing.sm }]}>
-                      <Text style={styles.itemSub}>
-                        First: {item.firstLowStockDate} • Last:{' '}
-                        {item.lastLowStockDate}
+                        </Text>{' '}
+                        (Min:{' '}
+                        {formatQuantity(
+                          item.applicableThreshold,
+                          item.unitSymbol
+                        )}
+                        )
                       </Text>
-                      <Text style={styles.linkText}>View History →</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text
+                        style={[
+                          styles.qtyBold,
+                          {
+                            color:
+                              item.outOfStockDays > 0
+                                ? palette.danger600
+                                : palette.warning600,
+                          },
+                        ]}
+                      >
+                        {item.lowStockDays + item.outOfStockDays} days low
+                      </Text>
+                      <Text style={styles.itemSub}>
+                        {formatDisplayDate(
+                          item.lastLowStockDate,
+                          profile?.dateFormat
+                        )}
+                      </Text>
                     </View>
                   </TouchableOpacity>
                 ))}
               </View>
             )}
           </SectionCard>
-        </View>
-      ) : null}
+        ) : null}
 
-      {/* ================================================================
-          ADDITIONAL REPORTS: CURRENT INVENTORY, INWARD, COUNTS, ADJUSTMENTS
-         ================================================================ */}
-      {reportMode === 'current_inventory' ? (
-        <SectionCard>
-          <Text style={styles.sectionTitle}>
-            Current Inventory & Category Report ({inventoryItems.length} SKUs)
-          </Text>
-          <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
-            {inventoryItems.map((i) => (
-              <View key={i.itemKey} style={styles.reportItemRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.itemTitle}>{i.displayName}</Text>
-                  <Text style={styles.itemSub}>
-                    {i.sku} • {i.categoryName}
-                  </Text>
-                  <ProvenanceBadge provenance={i.quantityProvenance} />
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  <StockStatusBadge status={i.stockStatus} size="sm" />
-                  <Text style={styles.qtyText}>
-                    {formatQuantity(i.recordedQuantity, i.unitSymbol)}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        </SectionCard>
-      ) : null}
-
-      {reportMode === 'inward_register' ||
-      reportMode === 'physical_counts' ||
-      reportMode === 'adjustments' ? (
-        <SectionCard>
-          <Text style={styles.sectionTitle}>
-            {reportMode === 'inward_register'
-              ? 'Stock Inward Report'
-              : reportMode === 'physical_counts'
-              ? 'Physical Stock-Count Reconciliation Report'
-              : 'Stock Adjustment Audit Report'}
-          </Text>
-          <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
-            {recentEvents
-              .filter((e) => {
-                const target =
-                  reportMode === 'inward_register'
-                    ? 'STOCK_INWARD'
-                    : reportMode === 'physical_counts'
-                    ? 'PHYSICAL_COUNT'
-                    : 'STOCK_ADJUSTMENT';
-                return (
-                  e.eventType === target &&
-                  e.eventDate >= startDate &&
-                  e.eventDate <= endDate
-                );
-              })
-              .map((ev) => (
-                <View key={ev.id} style={styles.reportItemRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.itemTitle}>{ev.displayName}</Text>
-                    <Text style={styles.itemSub}>
-                      {formatDisplayDate(ev.eventDate, profile?.dateFormat)} •
-                      SKU: {ev.sku}
-                    </Text>
-                    {ev.varianceQuantity !== null ? (
+        {/* ================================================================
+            TAB 3: CURRENT INVENTORY
+           ================================================================ */}
+        {reportMode === 'current_inventory' ? (
+          <SectionCard>
+            <View style={{ gap: 8 }}>
+              {inventoryItems
+                .filter(
+                  (i) =>
+                    !selectedCategoryId || i.categoryId === selectedCategoryId
+                )
+                .map((item) => (
+                  <TouchableOpacity
+                    key={item.itemKey}
+                    style={styles.reportItemRow}
+                    onPress={() => router.push(`/product/${item.productId}`)}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemTitle}>{item.displayName}</Text>
                       <Text style={styles.itemSub}>
-                        Count Variance vs Prev Balance: {ev.varianceQuantity}{' '}
-                        {ev.unitSymbol}
+                        {item.categoryName} • Min:{' '}
+                        {formatQuantity(
+                          item.minStockThreshold,
+                          item.unitSymbol
+                        )}
                       </Text>
-                    ) : null}
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={styles.qtyText}>
-                      {formatQuantity(ev.quantity, ev.unitSymbol)}
-                    </Text>
-                    <Text style={styles.itemSub}>
-                      Bal: {formatQuantity(ev.resultingBalance, ev.unitSymbol)}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-          </View>
-        </SectionCard>
-      ) : null}
-    </ScrollView>
+                    </View>
+                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                      <Text style={styles.qtyBold}>
+                        {formatQuantity(item.recordedQuantity, item.unitSymbol)}
+                      </Text>
+                      <StockStatusBadge status={item.stockStatus} size="sm" />
+                    </View>
+                  </TouchableOpacity>
+                ))}
+            </View>
+          </SectionCard>
+        ) : null}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -787,202 +624,189 @@ function getStyles() {
       flex: 1,
       backgroundColor: palette.slate50,
     },
-  scrollContent: {
-    padding: spacing.lg,
-    paddingBottom: 40,
-  },
-  modeTab: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: radius.pill,
-    backgroundColor: palette.white,
-    borderWidth: 1,
-    borderColor: palette.slate300,
-  },
-  modeTabActive: {
-    backgroundColor: palette.primary600,
-    borderColor: palette.primary600,
-  },
-  modeTabText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: palette.slate700,
-  },
-  modeTabTextActive: {
-    color: palette.white,
-  },
-  section: {
-    marginBottom: spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: palette.slate600,
-    marginBottom: 4,
-    marginTop: spacing.xs,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: palette.slate300,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 9,
-    fontSize: 13,
-    color: palette.slate900,
-    backgroundColor: palette.slate50,
-  },
-  presetRow: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-  },
-  presetChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 11,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: palette.slate300,
-    backgroundColor: palette.white,
-  },
-  presetChipActive: {
-    backgroundColor: palette.navy900,
-    borderColor: palette.navy900,
-  },
-  presetChipText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: palette.slate700,
-  },
-  presetChipTextActive: {
-    color: palette.white,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: spacing.md,
-  },
-  toggleLabel: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '600',
-    color: palette.slate700,
-  },
-  exportRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  dayHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  dayTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  daySubtitle: {
-    fontSize: 12,
-    color: palette.slate500,
-    marginTop: 2,
-  },
-  emptyDayText: {
-    fontSize: 12,
-    color: palette.slate500,
-    fontStyle: 'italic',
-    paddingVertical: 6,
-  },
-  reportItemRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: spacing.sm,
-    backgroundColor: palette.slate50,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.slate200,
-  },
-  itemTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  itemSub: {
-    fontSize: 11,
-    color: palette.slate500,
-    marginTop: 2,
-  },
-  qtyText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: palette.slate900,
-  },
-  consolidatedCard: {
-    padding: spacing.md,
-    backgroundColor: palette.slate50,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.slate200,
-  },
-  daysBadge: {
-    backgroundColor: palette.warning100,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-  },
-  daysBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: palette.warning700,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: palette.white,
-    padding: spacing.sm,
-    borderRadius: radius.sm,
-    marginTop: spacing.sm,
-  },
-  statLabel: {
-    fontSize: 10,
-    color: palette.slate500,
-  },
-  statValue: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: palette.slate900,
-    marginTop: 2,
-  },
-  linkText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: palette.primary600,
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: palette.danger50,
-    padding: spacing.sm,
-    borderRadius: radius.sm,
-    marginTop: spacing.xs,
-  },
+    tabBar: {
+      flexDirection: 'row',
+      backgroundColor: palette.white,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.slate200,
+      gap: 8,
+    },
+    tabBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: radius.md,
+      backgroundColor: palette.slate100,
+      alignItems: 'center',
+    },
+    tabBtnActive: {
+      backgroundColor: palette.primary600,
+    },
+    tabText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: palette.slate700,
+    },
+    tabTextActive: {
+      color: '#FFFFFF',
+    },
+    scrollContent: {
+      padding: spacing.md,
+      paddingBottom: 40,
+    },
+    filterCard: {
+      backgroundColor: palette.white,
+      borderRadius: radius.md,
+      padding: spacing.sm,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+      marginBottom: spacing.md,
+    },
+    rowBetween: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    row: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    presetRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    presetChip: {
+      paddingVertical: 5,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: palette.slate100,
+    },
+    presetChipActive: {
+      backgroundColor: palette.primary600,
+    },
+    presetChipText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.slate700,
+    },
+    presetChipTextActive: {
+      color: '#FFFFFF',
+    },
+    label: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: palette.slate600,
+      marginBottom: 2,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: palette.slate300,
+      borderRadius: radius.sm,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      fontSize: 13,
+      color: palette.slate900,
+      backgroundColor: palette.slate50,
+    },
     errorText: {
-      color: palette.danger700,
       fontSize: 12,
       fontWeight: '600',
+      color: palette.danger600,
+      marginTop: 6,
+    },
+    categoryAndExportRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: 1,
+      borderTopColor: palette.slate100,
+    },
+    catChip: {
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: palette.slate50,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+    },
+    catChipActive: {
+      backgroundColor: palette.navy900,
+      borderColor: palette.navy900,
+    },
+    catChipText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.slate600,
+    },
+    catChipTextActive: {
+      color: palette.white,
+    },
+    exportChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 5,
+      paddingHorizontal: 9,
+      borderRadius: radius.sm,
+      backgroundColor: palette.primary50,
+      borderWidth: 1,
+      borderColor: palette.primary100,
+    },
+    exportChipText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.primary600,
+    },
+    dayHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    dayTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    daySubtitle: {
+      fontSize: 12,
+      color: palette.slate500,
+      marginTop: 2,
+    },
+    emptyDayNote: {
+      fontSize: 12,
+      color: palette.slate500,
+      fontStyle: 'italic',
+      marginTop: spacing.sm,
+    },
+    reportItemRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: spacing.md,
+      backgroundColor: palette.slate50,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+    },
+    itemTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    itemSub: {
+      fontSize: 12,
+      color: palette.slate500,
+      marginTop: 2,
+    },
+    qtyBold: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: palette.slate900,
     },
   });
 }

@@ -3,17 +3,13 @@ import {
   PrimaryButton,
   SectionCard,
 } from '@/components/common/AppComponents';
-import {
-  ProvenanceBadge,
-  StockStatusBadge,
-} from '@/components/inventory/StatusBadge';
+import { StockStatusBadge } from '@/components/inventory/StatusBadge';
 import { formatDisplayDate, getTodayInTimezone } from '@/core/utils/dateUtils';
 import {
   addQuantities,
   formatQuantity,
   subtractQuantities,
 } from '@/core/utils/quantityMath';
-import { STOCK_ADJUSTMENT_REASONS } from '@/domain/enums';
 import { useAppStore } from '@/stores/useAppStore';
 import { palette, radius, spacing } from '@/theme';
 import { Feather } from '@expo/vector-icons';
@@ -31,29 +27,34 @@ import {
   View,
 } from 'react-native';
 
-type StockTab = 'inward' | 'count' | 'adjustment' | 'ledger';
+type StockTab = 'inward' | 'count' | 'ledger';
 type ActiveDropdown = 'category' | 'product' | 'variant' | null;
 
 export default function StockOperationsScreen() {
   const styles = getStyles();
   const router = useRouter();
-  const params = useLocalSearchParams<{ tab?: StockTab; itemKey?: string }>();
+  const params = useLocalSearchParams<{ tab?: string; itemKey?: string }>();
 
   const profile = useAppStore((s) => s.profile);
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const inventoryItems = useAppStore((s) => s.inventoryItems);
   const categories = useAppStore((s) => s.categories);
-  const suppliers = useAppStore((s) => s.suppliers);
   const recentEvents = useAppStore((s) => s.recentEvents);
   const recordStockInward = useAppStore((s) => s.recordStockInward);
   const recordBatchPhysicalCount = useAppStore(
     (s) => s.recordBatchPhysicalCount
   );
-  const recordStockAdjustment = useAppStore((s) => s.recordStockAdjustment);
 
   const today = getTodayInTimezone(profile?.timezone || 'Asia/Kolkata');
 
-  const [activeTab, setActiveTab] = useState<StockTab>(params.tab || 'inward');
+  const initialTab: StockTab =
+    params.tab === 'count'
+      ? 'count'
+      : params.tab === 'ledger'
+      ? 'ledger'
+      : 'inward';
+
+  const [activeTab, setActiveTab] = useState<StockTab>(initialTab);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -66,47 +67,30 @@ export default function StockOperationsScreen() {
     null
   );
   const [openDropdown, setOpenDropdown] = useState<ActiveDropdown>(null);
-  const [sortBy, setSortBy] = useState<'input_order' | 'name'>('input_order');
+  const [dropdownSearch, setDropdownSearch] = useState('');
 
-  // --- Workflow A: Stock Inward State ---
+  // --- Stock Inward State ---
   const [inwardItemKey, setInwardItemKey] = useState<string>(
     params.itemKey || inventoryItems[0]?.itemKey || ''
   );
-  const [inwardSearch, setInwardSearch] = useState('');
   const [inwardQty, setInwardQty] = useState('');
   const [inwardDate, setInwardDate] = useState(today);
-  const [inwardSupplierId, setInwardSupplierId] = useState<string | null>(null);
   const [inwardRef, setInwardRef] = useState('');
   const [inwardNotes, setInwardNotes] = useState('');
+  const [showInwardOptional, setShowInwardOptional] = useState(false);
   const [submittingInward, setSubmittingInward] = useState(false);
 
-  // --- Workflow B: Daily Physical Stock Count State ---
+  // --- Physical Stock Count State ---
   const [countDate, setCountDate] = useState(today);
-  const [countSearch, setCountSearch] = useState('');
-  const [countCategoryId, setCountCategoryId] = useState<string | null>(null);
   const [countInputs, setCountInputs] = useState<Record<string, string>>({});
-  const [countSessionNotes, setCountSessionNotes] = useState('');
   const [submittingCount, setSubmittingCount] = useState(false);
 
-  // --- Workflow D: Controlled Stock Adjustment State ---
-  const [adjItemKey, setAdjItemKey] = useState<string>(
-    params.itemKey || inventoryItems[0]?.itemKey || ''
-  );
-  const [adjDelta, setAdjDelta] = useState('');
-  const [adjReason, setAdjReason] = useState<string>(
-    STOCK_ADJUSTMENT_REASONS[0]
-  );
-  const [adjDate, setAdjDate] = useState(today);
-  const [adjNotes, setAdjNotes] = useState('');
-  const [submittingAdj, setSubmittingAdj] = useState(false);
-
   useEffect(() => {
-    if (params.tab) {
+    if (params.tab === 'count' || params.tab === 'ledger' || params.tab === 'inward') {
       setActiveTab(params.tab);
     }
     if (params.itemKey) {
       setInwardItemKey(params.itemKey);
-      setAdjItemKey(params.itemKey);
       const matched = inventoryItems.find((i) => i.itemKey === params.itemKey);
       if (matched) {
         setFilterCategoryId(matched.categoryId);
@@ -118,14 +102,15 @@ export default function StockOperationsScreen() {
 
   useEffect(() => {
     if (!inwardItemKey && inventoryItems.length > 0) {
-      setInwardItemKey(inventoryItems[0].itemKey);
+      const first = inventoryItems[0];
+      setInwardItemKey(first.itemKey);
+      setFilterCategoryId(first.categoryId);
+      setFilterProductId(first.productId);
+      setFilterVariantOption(first.variantName);
     }
-    if (!adjItemKey && inventoryItems.length > 0) {
-      setAdjItemKey(inventoryItems[0].itemKey);
-    }
-  }, [inventoryItems, inwardItemKey, adjItemKey]);
+  }, [inventoryItems, inwardItemKey]);
 
-  // Distinct products for the Quick Product Dropdown (filtered by selected category if any)
+  // Distinct products for the Product Dropdown
   const availableProducts = useMemo(() => {
     const map = new Map<
       string,
@@ -146,7 +131,7 @@ export default function StockOperationsScreen() {
     return Array.from(map.values());
   }, [inventoryItems, filterCategoryId]);
 
-  // Distinct sizes / variant names in EXACT input order (never alphabetically scrambled!)
+  // Distinct sizes / variant names in EXACT input order
   const availableVariantOptions = useMemo(() => {
     const seen = new Set<string>();
     const ordered: string[] = [];
@@ -172,59 +157,20 @@ export default function StockOperationsScreen() {
     return ordered;
   }, [inventoryItems, filterCategoryId, filterProductId]);
 
-  const selectedCategoryName =
-    categories.find((c) => c.id === filterCategoryId)?.name || 'All Categories';
-  const selectedProductName =
-    availableProducts.find((p) => p.productId === filterProductId)
-      ?.productName || 'All Items / Styles';
-
   const selectedInwardItem = inventoryItems.find(
     (i) => i.itemKey === inwardItemKey
   );
-  const selectedAdjItem = inventoryItems.find((i) => i.itemKey === adjItemKey);
 
-  const filteredInwardPickerItems = useMemo(() => {
-    const q = inwardSearch.trim().toLowerCase();
-    const list = inventoryItems.filter((item) => {
-      if (filterCategoryId && item.categoryId !== filterCategoryId) {
-        return false;
-      }
-      if (filterProductId && item.productId !== filterProductId) {
-        return false;
-      }
-      if (filterVariantOption && item.variantName !== filterVariantOption) {
-        return false;
-      }
-      if (q) {
-        const matchName = item.displayName.toLowerCase().includes(q);
-        const matchSku = item.sku.toLowerCase().includes(q);
-        const matchBarcode = item.barcode?.toLowerCase().includes(q) ?? false;
-        if (!matchName && !matchSku && !matchBarcode) return false;
-      }
-      return true;
-    });
+  const selectedCategoryName =
+    categories.find((c) => c.id === filterCategoryId)?.name ||
+    selectedInwardItem?.categoryName ||
+    'All';
+  const selectedProductName =
+    availableProducts.find((p) => p.productId === filterProductId)
+      ?.productName ||
+    selectedInwardItem?.productName ||
+    'Select Product';
 
-    list.sort((a, b) => {
-      if (sortBy === 'name') {
-        return a.displayName.localeCompare(b.displayName);
-      }
-      if (a.productId === b.productId) {
-        return (a.variantSortOrder ?? 0) - (b.variantSortOrder ?? 0);
-      }
-      return 0;
-    });
-
-    return list;
-  }, [
-    inventoryItems,
-    inwardSearch,
-    filterCategoryId,
-    filterProductId,
-    filterVariantOption,
-    sortBy,
-  ]);
-
-  // Automatically sync selected inwardItemKey & adjItemKey when filters narrow down the matching items
   const selectFirstMatchingItem = (
     catId: string | null,
     prodId: string | null,
@@ -244,33 +190,28 @@ export default function StockOperationsScreen() {
         return 0;
       });
     if (matching.length > 0) {
-      setInwardItemKey(matching[0].itemKey);
-      setAdjItemKey(matching[0].itemKey);
+      const picked = matching[0];
+      setInwardItemKey(picked.itemKey);
+      if (!prodId) {
+        setFilterProductId(picked.productId);
+      }
+      if (!variantOpt && picked.variantName) {
+        setFilterVariantOption(picked.variantName);
+      }
     }
   };
 
   const filteredCountItems = useMemo(() => {
-    const q = countSearch.trim().toLowerCase();
     const list = inventoryItems.filter((i) => {
-      const effectiveCatId = countCategoryId ?? filterCategoryId;
-      if (effectiveCatId && i.categoryId !== effectiveCatId) return false;
+      if (filterCategoryId && i.categoryId !== filterCategoryId) return false;
       if (filterProductId && i.productId !== filterProductId) return false;
       if (filterVariantOption && i.variantName !== filterVariantOption) {
         return false;
-      }
-      if (q) {
-        return (
-          i.displayName.toLowerCase().includes(q) ||
-          i.sku.toLowerCase().includes(q)
-        );
       }
       return true;
     });
 
     list.sort((a, b) => {
-      if (sortBy === 'name') {
-        return a.displayName.localeCompare(b.displayName);
-      }
       if (a.productId === b.productId) {
         return (a.variantSortOrder ?? 0) - (b.variantSortOrder ?? 0);
       }
@@ -278,22 +219,14 @@ export default function StockOperationsScreen() {
     });
 
     return list;
-  }, [
-    inventoryItems,
-    countCategoryId,
-    filterCategoryId,
-    filterProductId,
-    filterVariantOption,
-    countSearch,
-    sortBy,
-  ]);
+  }, [inventoryItems, filterCategoryId, filterProductId, filterVariantOption]);
 
   const handleInwardSubmit = async () => {
     setFeedback(null);
     if (!selectedInwardItem) {
       setFeedback({
         type: 'error',
-        message: 'Please select a product or variant.',
+        message: 'Please select a product.',
       });
       return;
     }
@@ -301,7 +234,7 @@ export default function StockOperationsScreen() {
     if (!qty || Number.isNaN(qty) || qty <= 0) {
       setFeedback({
         type: 'error',
-        message: 'Quantity received must be greater than zero.',
+        message: 'Enter a valid quantity greater than zero.',
       });
       return;
     }
@@ -313,7 +246,7 @@ export default function StockOperationsScreen() {
         variantId: selectedInwardItem.variantId,
         quantity: qty,
         eventDate: inwardDate,
-        supplierId: inwardSupplierId,
+        supplierId: null,
         referenceNumber: inwardRef.trim() || null,
         notes: inwardNotes.trim() || null,
       });
@@ -322,10 +255,10 @@ export default function StockOperationsScreen() {
       setInwardNotes('');
       setFeedback({
         type: 'success',
-        message: `Recorded +${formatQuantity(
+        message: `Added +${formatQuantity(
           qty,
           selectedInwardItem.unitSymbol
-        )} inward stock for ${selectedInwardItem.displayName}.`,
+        )} to ${selectedInwardItem.displayName}.`,
       });
     } catch (err) {
       setFeedback({ type: 'error', message: (err as Error).message });
@@ -349,7 +282,7 @@ export default function StockOperationsScreen() {
       if (Number.isNaN(num) || num < 0) {
         setFeedback({
           type: 'error',
-          message: 'All entered physical count quantities must be 0 or greater.',
+          message: 'Quantities must be 0 or greater.',
         });
         return;
       }
@@ -367,8 +300,7 @@ export default function StockOperationsScreen() {
     if (entries.length === 0) {
       setFeedback({
         type: 'error',
-        message:
-          'Enter at least one observed physical count quantity before saving.',
+        message: 'Enter at least one counted quantity before saving.',
       });
       return;
     }
@@ -377,14 +309,13 @@ export default function StockOperationsScreen() {
     try {
       await recordBatchPhysicalCount({
         eventDate: countDate,
-        sessionNotes: countSessionNotes.trim() || null,
+        sessionNotes: null,
         entries,
       });
       setCountInputs({});
-      setCountSessionNotes('');
       setFeedback({
         type: 'success',
-        message: `Saved verified physical stock count for ${entries.length} item(s) on ${countDate}.`,
+        message: `Updated physical stock count for ${entries.length} item(s).`,
       });
     } catch (err) {
       setFeedback({ type: 'error', message: (err as Error).message });
@@ -393,62 +324,26 @@ export default function StockOperationsScreen() {
     }
   };
 
-  const handleAdjustmentSubmit = async () => {
-    setFeedback(null);
-    if (!selectedAdjItem) {
-      setFeedback({
-        type: 'error',
-        message: 'Please select a product or variant.',
-      });
-      return;
-    }
-    const delta = Number(adjDelta);
-    if (Number.isNaN(delta) || delta === 0) {
-      setFeedback({
-        type: 'error',
-        message: 'Enter a non-zero quantity difference (e.g., -2 or +5).',
-      });
-      return;
-    }
-    setSubmittingAdj(true);
-    try {
-      await recordStockAdjustment({
-        itemKey: selectedAdjItem.itemKey,
-        productId: selectedAdjItem.productId,
-        variantId: selectedAdjItem.variantId,
-        quantityDelta: delta,
-        reason: adjReason,
-        eventDate: adjDate,
-        notes: adjNotes.trim() || null,
-      });
-      setAdjDelta('');
-      setAdjNotes('');
-      setFeedback({
-        type: 'success',
-        message: `Recorded stock adjustment (${
-          delta > 0 ? `+${delta}` : delta
-        } ${selectedAdjItem.unitSymbol}) for ${selectedAdjItem.displayName}.`,
-      });
-    } catch (err) {
-      setFeedback({ type: 'error', message: (err as Error).message });
-    } finally {
-      setSubmittingAdj(false);
-    }
-  };
+  const filteredProductsForModal = useMemo(() => {
+    const q = dropdownSearch.trim().toLowerCase();
+    if (!q) return availableProducts;
+    return availableProducts.filter((p) =>
+      p.productName.toLowerCase().includes(q)
+    );
+  }, [availableProducts, dropdownSearch]);
 
   return (
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* 4 Stock Sub-Tabs */}
+      {/* Clean 3-Tab Bar */}
       <View style={styles.tabBar}>
         {(
           [
-            { key: 'inward', label: 'Stock Inward' },
-            { key: 'count', label: 'Physical Count' },
-            { key: 'adjustment', label: 'Adjustment' },
-            { key: 'ledger', label: 'Ledger' },
+            { key: 'inward', label: 'Add Stock' },
+            { key: 'count', label: 'Update Count' },
+            { key: 'ledger', label: 'History' },
           ] as { key: StockTab; label: string }[]
         ).map((t) => (
           <TouchableOpacity
@@ -517,53 +412,20 @@ export default function StockOperationsScreen() {
         {inventoryItems.length === 0 ? (
           <EmptyStateView
             icon="package"
-            title="No Products Available"
-            message="Add at least one product before recording incoming deliveries or physical stock counts."
+            title="No Products Yet"
+            message="Add your first product before recording stock."
             actionTitle="Add Product"
             onActionPress={() => router.push('/product/new')}
           />
         ) : null}
 
         {/* ================================================================
-            QUICK ITEM PICKER DROPDOWN BAR (1. Category -> 2. Product -> 3. Size / Type)
+            CLEAN FILTER BAR (Category -> Product -> Size / Type)
            ================================================================ */}
         {activeTab !== 'ledger' && inventoryItems.length > 0 ? (
-          <SectionCard style={styles.quickFilterCard}>
-            <View style={styles.rowBetween}>
-              <Text style={styles.quickFilterHeader}>
-                Quick Shop Filter (Category → Product → Size / Type)
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <TouchableOpacity
-                  onPress={() =>
-                    setSortBy((prev) =>
-                      prev === 'input_order' ? 'name' : 'input_order'
-                    )
-                  }
-                  style={styles.sortToggleChip}
-                >
-                  <Feather name="sliders" size={11} color={palette.primary600} />
-                  <Text style={styles.sortToggleText}>
-                    {sortBy === 'input_order' ? 'Input Size Order' : 'A–Z Order'}
-                  </Text>
-                </TouchableOpacity>
-                {filterCategoryId || filterProductId || filterVariantOption ? (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setFilterCategoryId(null);
-                      setFilterProductId(null);
-                      setFilterVariantOption(null);
-                      setCountCategoryId(null);
-                    }}
-                  >
-                    <Text style={styles.clearFilterText}>Reset</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
-
+          <View style={styles.filterBox}>
             <View style={styles.dropdownRow}>
-              {/* 1. Category Dropdown */}
+              {/* 1. Category */}
               <TouchableOpacity
                 style={[
                   styles.dropdownSelector,
@@ -572,40 +434,43 @@ export default function StockOperationsScreen() {
                 onPress={() => setOpenDropdown('category')}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.dropdownLabel}>1. Category</Text>
+                  <Text style={styles.dropdownLabel}>Category</Text>
                   <Text style={styles.dropdownValue} numberOfLines={1}>
                     {selectedCategoryName}
                   </Text>
                 </View>
                 <Feather
                   name="chevron-down"
-                  size={15}
-                  color={palette.slate600}
+                  size={14}
+                  color={palette.slate500}
                 />
               </TouchableOpacity>
 
-              {/* 2. Product / Name Dropdown */}
+              {/* 2. Product */}
               <TouchableOpacity
                 style={[
                   styles.dropdownSelector,
                   filterProductId ? styles.dropdownSelectorActive : null,
                 ]}
-                onPress={() => setOpenDropdown('product')}
+                onPress={() => {
+                  setDropdownSearch('');
+                  setOpenDropdown('product');
+                }}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.dropdownLabel}>2. Product / Name</Text>
+                  <Text style={styles.dropdownLabel}>Product</Text>
                   <Text style={styles.dropdownValue} numberOfLines={1}>
                     {selectedProductName}
                   </Text>
                 </View>
                 <Feather
                   name="chevron-down"
-                  size={15}
-                  color={palette.slate600}
+                  size={14}
+                  color={palette.slate500}
                 />
               </TouchableOpacity>
 
-              {/* 3. Size / Type Dropdown */}
+              {/* 3. Size / Type */}
               {availableVariantOptions.length > 0 ? (
                 <TouchableOpacity
                   style={[
@@ -615,59 +480,62 @@ export default function StockOperationsScreen() {
                   onPress={() => setOpenDropdown('variant')}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.dropdownLabel}>3. Size / Type</Text>
+                    <Text style={styles.dropdownLabel}>Size / Type</Text>
                     <Text style={styles.dropdownValue} numberOfLines={1}>
-                      {filterVariantOption || 'All Sizes / Types'}
+                      {filterVariantOption ||
+                        selectedInwardItem?.variantName ||
+                        'All'}
                     </Text>
                   </View>
                   <Feather
                     name="chevron-down"
-                    size={15}
-                    color={palette.slate600}
+                    size={14}
+                    color={palette.slate500}
                   />
                 </TouchableOpacity>
               ) : null}
             </View>
 
-            {/* Quick Size / Type Pills in exact input sequence (S, M, L, XL, XXL / 30..40 / Elastic, Zip) */}
+            {/* One-Tap Size / Type Pills in Exact Input Order */}
             {availableVariantOptions.length > 0 ? (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                style={{ marginTop: spacing.sm }}
+                style={{ marginTop: 8 }}
                 contentContainerStyle={{ gap: 6 }}
               >
-                <TouchableOpacity
-                  onPress={() => {
-                    setFilterVariantOption(null);
-                    selectFirstMatchingItem(filterCategoryId, filterProductId, null);
-                  }}
-                  style={[
-                    styles.sizePill,
-                    !filterVariantOption && styles.sizePillActive,
-                  ]}
-                >
-                  <Text
+                {activeTab === 'count' ? (
+                  <TouchableOpacity
+                    onPress={() => setFilterVariantOption(null)}
                     style={[
-                      styles.sizePillText,
-                      !filterVariantOption && styles.sizePillTextActive,
+                      styles.sizePill,
+                      !filterVariantOption && styles.sizePillActive,
                     ]}
                   >
-                    All Sizes / Types
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.sizePillText,
+                        !filterVariantOption && styles.sizePillTextActive,
+                      ]}
+                    >
+                      All Sizes
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
                 {availableVariantOptions.map((opt) => {
-                  const active = filterVariantOption === opt;
+                  const active =
+                    activeTab === 'inward'
+                      ? selectedInwardItem?.variantName === opt
+                      : filterVariantOption === opt;
                   return (
                     <TouchableOpacity
                       key={opt}
                       onPress={() => {
-                        const nextOpt = active ? null : opt;
-                        setFilterVariantOption(nextOpt);
+                        setFilterVariantOption(opt);
                         selectFirstMatchingItem(
                           filterCategoryId,
                           filterProductId,
-                          nextOpt
+                          opt
                         );
                       }}
                       style={[styles.sizePill, active && styles.sizePillActive]}
@@ -685,199 +553,129 @@ export default function StockOperationsScreen() {
                 })}
               </ScrollView>
             ) : null}
-          </SectionCard>
+          </View>
         ) : null}
 
         {/* ================================================================
-            WORKFLOW A: STOCK INWARD
+            TAB 1: ADD STOCK INWARD
            ================================================================ */}
         {activeTab === 'inward' && inventoryItems.length > 0 ? (
           <SectionCard>
-            <View style={styles.rowBetween}>
-              <View>
-                <Text style={styles.cardTitle}>Record Incoming Stock</Text>
-                <Text style={styles.cardSubtitle}>
-                  Increases recorded balance atomically and updates daily snapshots
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.scanChip}
-                onPress={() => router.push('/scanner')}
-              >
-                <Feather name="maximize" size={14} color={palette.primary600} />
-                <Text style={styles.scanChipText}>Scan</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.label}>
-              Matching Products / Sizes ({filteredInwardPickerItems.length}) *
-            </Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Search by product name, SKU, or barcode..."
-              value={inwardSearch}
-              onChangeText={setInwardSearch}
-            />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginTop: spacing.xs }}
-              contentContainerStyle={{ gap: spacing.xs }}
-            >
-              {filteredInwardPickerItems.map((item) => {
-                const selected = item.itemKey === inwardItemKey;
-                return (
-                  <TouchableOpacity
-                    key={item.itemKey}
-                    onPress={() => setInwardItemKey(item.itemKey)}
-                    style={[
-                      styles.pickerPill,
-                      selected && styles.pickerPillSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pickerPillText,
-                        selected && styles.pickerPillTextSelected,
-                      ]}
-                    >
-                      {item.displayName} (
-                      {formatQuantity(item.recordedQuantity, item.unitSymbol)})
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
             {selectedInwardItem ? (
               <View style={styles.previewBox}>
                 <View style={styles.rowBetween}>
-                  <Text style={styles.previewTitle}>
-                    {selectedInwardItem.displayName}
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.previewTitle}>
+                      {selectedInwardItem.displayName}
+                    </Text>
+                    <Text style={styles.previewMeta}>
+                      {selectedInwardItem.categoryName}
+                    </Text>
+                  </View>
                   <StockStatusBadge
                     status={selectedInwardItem.stockStatus}
                     size="sm"
                   />
                 </View>
-                <Text style={styles.previewSub}>
-                  Current Recorded Balance:{' '}
-                  <Text style={styles.bold}>
-                    {formatQuantity(
-                      selectedInwardItem.recordedQuantity,
-                      selectedInwardItem.unitSymbol
-                    )}
-                  </Text>{' '}
-                  • New Balance Preview:{' '}
-                  <Text style={[styles.bold, { color: palette.primary600 }]}>
-                    {formatQuantity(
-                      addQuantities(
-                        selectedInwardItem.recordedQuantity ?? 0,
-                        Number(inwardQty) > 0 ? Number(inwardQty) : 0
-                      ),
-                      selectedInwardItem.unitSymbol
-                    )}
-                  </Text>
-                </Text>
-              </View>
-            ) : null}
 
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>
-                  Quantity Received (
-                  {selectedInwardItem?.unitSymbol || 'units'}) *
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="decimal-pad"
-                  placeholder="e.g., 50"
-                  value={inwardQty}
-                  onChangeText={setInwardQty}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Receipt Date (YYYY-MM-DD) *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={inwardDate}
-                  onChangeText={setInwardDate}
-                />
-              </View>
-            </View>
-
-            {suppliers.length > 0 ? (
-              <>
-                <Text style={styles.label}>Supplier (Optional)</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: spacing.xs }}
-                >
-                  <TouchableOpacity
-                    onPress={() => setInwardSupplierId(null)}
-                    style={[
-                      styles.pickerPill,
-                      inwardSupplierId === null && styles.pickerPillSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pickerPillText,
-                        inwardSupplierId === null &&
-                          styles.pickerPillTextSelected,
-                      ]}
-                    >
-                      No Supplier
+                <View style={styles.balancePreviewRow}>
+                  <View>
+                    <Text style={styles.balanceLabel}>Current Stock</Text>
+                    <Text style={styles.balanceVal}>
+                      {formatQuantity(
+                        selectedInwardItem.recordedQuantity,
+                        selectedInwardItem.unitSymbol
+                      )}
                     </Text>
-                  </TouchableOpacity>
-                  {suppliers.map((s) => {
-                    const selected = inwardSupplierId === s.id;
-                    return (
-                      <TouchableOpacity
-                        key={s.id}
-                        onPress={() => setInwardSupplierId(s.id)}
-                        style={[
-                          styles.pickerPill,
-                          selected && styles.pickerPillSelected,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.pickerPillText,
-                            selected && styles.pickerPillTextSelected,
-                          ]}
-                        >
-                          {s.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </>
+                  </View>
+                  <Feather
+                    name="arrow-right"
+                    size={16}
+                    color={palette.slate400}
+                  />
+                  <View>
+                    <Text style={styles.balanceLabel}>After Adding</Text>
+                    <Text
+                      style={[styles.balanceVal, { color: palette.primary600 }]}
+                    >
+                      {formatQuantity(
+                        addQuantities(
+                          selectedInwardItem.recordedQuantity ?? 0,
+                          Number(inwardQty) > 0 ? Number(inwardQty) : 0
+                        ),
+                        selectedInwardItem.unitSymbol
+                      )}
+                    </Text>
+                  </View>
+                </View>
+              </View>
             ) : null}
 
             <Text style={styles.label}>
-              Invoice / Reference Number (Optional)
+              Quantity Received ({selectedInwardItem?.unitSymbol || 'pcs'}) *
             </Text>
             <TextInput
-              style={styles.input}
-              placeholder="e.g., INV-2026-104"
-              value={inwardRef}
-              onChangeText={setInwardRef}
+              style={styles.qtyLargeInput}
+              keyboardType="decimal-pad"
+              placeholder="0"
+              placeholderTextColor={palette.slate400}
+              value={inwardQty}
+              onChangeText={setInwardQty}
             />
 
-            <Text style={styles.label}>Notes (Optional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Batch details, delivery remarks..."
-              value={inwardNotes}
-              onChangeText={setInwardNotes}
-            />
+            <TouchableOpacity
+              style={styles.optionalToggle}
+              onPress={() => setShowInwardOptional((v) => !v)}
+            >
+              <Feather
+                name={showInwardOptional ? 'chevron-up' : 'chevron-down'}
+                size={15}
+                color={palette.primary600}
+              />
+              <Text style={styles.optionalToggleText}>
+                {showInwardOptional
+                  ? 'Hide Optional Details'
+                  : 'Add Date, Bill No, or Note (Optional)'}
+              </Text>
+            </TouchableOpacity>
+
+            {showInwardOptional ? (
+              <View style={{ marginTop: spacing.xs }}>
+                <View style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Date (YYYY-MM-DD)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={inwardDate}
+                      onChangeText={setInwardDate}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Bill / Invoice No</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Optional"
+                      placeholderTextColor={palette.slate400}
+                      value={inwardRef}
+                      onChangeText={setInwardRef}
+                    />
+                  </View>
+                </View>
+
+                <Text style={styles.label}>Note</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Optional delivery note..."
+                  placeholderTextColor={palette.slate400}
+                  value={inwardNotes}
+                  onChangeText={setInwardNotes}
+                />
+              </View>
+            ) : null}
 
             <PrimaryButton
-              title="Save Stock Inward Transaction"
-              icon="arrow-down-circle"
+              title="Save Stock Inward"
+              icon="check"
               loading={submittingInward}
               onPress={handleInwardSubmit}
               style={{ marginTop: spacing.lg }}
@@ -886,94 +684,31 @@ export default function StockOperationsScreen() {
         ) : null}
 
         {/* ================================================================
-            WORKFLOW B: DAILY PHYSICAL STOCK COUNT
+            TAB 2: UPDATE / PHYSICAL COUNT
            ================================================================ */}
         {activeTab === 'count' && inventoryItems.length > 0 ? (
           <SectionCard>
-            <Text style={styles.cardTitle}>
-              Daily Physical Stock Count Sheet
-            </Text>
-            <Text style={styles.cardSubtitle}>
-              Establishes actual observed shelf quantities. Differences from previous inward-only balances are recorded as Physical Count Reconciliations — never as sales.
-            </Text>
-
-            <View style={styles.row}>
+            <View style={styles.rowBetween}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Count Date (YYYY-MM-DD) *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={countDate}
-                  onChangeText={setCountDate}
-                />
+                <Text style={styles.cardTitle}>Update Actual Shelf Stock</Text>
+                <Text style={styles.cardSubtitle}>
+                  Type the current shelf count for any item below and save.
+                </Text>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Session Note (Optional)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Evening shelf count"
-                  value={countSessionNotes}
-                  onChangeText={setCountSessionNotes}
-                />
-              </View>
+              {(filterCategoryId || filterProductId || filterVariantOption) ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    setFilterCategoryId(null);
+                    setFilterProductId(null);
+                    setFilterVariantOption(null);
+                  }}
+                >
+                  <Text style={styles.clearFilterText}>Show All</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
 
-            <Text style={styles.label}>Filter Items</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Search product or SKU..."
-              value={countSearch}
-              onChangeText={setCountSearch}
-            />
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginVertical: spacing.sm }}
-              contentContainerStyle={{ gap: spacing.xs }}
-            >
-              <TouchableOpacity
-                onPress={() => setCountCategoryId(null)}
-                style={[
-                  styles.pickerPill,
-                  !countCategoryId && styles.pickerPillSelected,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.pickerPillText,
-                    !countCategoryId && styles.pickerPillTextSelected,
-                  ]}
-                >
-                  All Categories
-                </Text>
-              </TouchableOpacity>
-              {categories.map((c) => {
-                const selected = countCategoryId === c.id;
-                return (
-                  <TouchableOpacity
-                    key={c.id}
-                    onPress={() =>
-                      setCountCategoryId(selected ? null : c.id)
-                    }
-                    style={[
-                      styles.pickerPill,
-                      selected && styles.pickerPillSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pickerPillText,
-                        selected && styles.pickerPillTextSelected,
-                      ]}
-                    >
-                      {c.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
+            <View style={{ gap: 8, marginTop: spacing.md }}>
               {filteredCountItems.map((item) => {
                 const enteredStr = countInputs[item.itemKey] ?? '';
                 const hasEntered = enteredStr.trim() !== '';
@@ -990,44 +725,35 @@ export default function StockOperationsScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.itemTitle}>{item.displayName}</Text>
                       <Text style={styles.itemSub}>
-                        Prev Recorded:{' '}
+                        Current:{' '}
                         <Text style={styles.bold}>
                           {formatQuantity(
                             item.recordedQuantity,
                             item.unitSymbol
                           )}
-                        </Text>{' '}
-                        • Min:{' '}
-                        {formatQuantity(
-                          item.minStockThreshold,
-                          item.unitSymbol
-                        )}
-                      </Text>
-                      {variance !== null ? (
-                        <Text
-                          style={[
-                            styles.varianceBadge,
-                            {
+                        </Text>
+                        {variance !== null && variance !== 0 ? (
+                          <Text
+                            style={{
                               color:
                                 variance < 0
-                                  ? palette.warning700
-                                  : variance > 0
-                                  ? palette.success700
-                                  : palette.slate600,
-                            },
-                          ]}
-                        >
-                          Count Difference:{' '}
-                          {variance > 0 ? `+${variance}` : variance}{' '}
-                          {item.unitSymbol} (Physical Count Reconciliation)
-                        </Text>
-                      ) : null}
+                                  ? palette.warning600
+                                  : palette.success600,
+                              fontWeight: '700',
+                            }}
+                          >
+                            {' '}
+                            ({variance > 0 ? `+${variance}` : variance})
+                          </Text>
+                        ) : null}
+                      </Text>
                     </View>
-                    <View style={{ width: 110 }}>
+                    <View style={{ width: 96 }}>
                       <TextInput
                         style={styles.countInput}
                         keyboardType="decimal-pad"
-                        placeholder={`Count (${item.unitSymbol})`}
+                        placeholder={String(item.recordedQuantity ?? 0)}
+                        placeholderTextColor={palette.slate400}
                         value={enteredStr}
                         onChangeText={(val) =>
                           setCountInputs((prev) => ({
@@ -1043,7 +769,7 @@ export default function StockOperationsScreen() {
             </View>
 
             <PrimaryButton
-              title="Commit Physical Stock Count Session"
+              title="Save Updated Counts"
               icon="check-square"
               loading={submittingCount}
               onPress={handleBatchPhysicalCountSubmit}
@@ -1053,169 +779,59 @@ export default function StockOperationsScreen() {
         ) : null}
 
         {/* ================================================================
-            WORKFLOW D: CONTROLLED STOCK ADJUSTMENT
-           ================================================================ */}
-        {activeTab === 'adjustment' && inventoryItems.length > 0 ? (
-          <SectionCard>
-            <Text style={styles.cardTitle}>Controlled Stock Adjustment</Text>
-            <Text style={styles.cardSubtitle}>
-              Explicitly audited quantity corrections with mandatory reason codes
-            </Text>
-
-            <Text style={styles.label}>
-              Select Product / Variant ({filteredInwardPickerItems.length}) *
-            </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: spacing.xs }}
-            >
-              {filteredInwardPickerItems.map((item) => {
-                const selected = item.itemKey === adjItemKey;
-                return (
-                  <TouchableOpacity
-                    key={item.itemKey}
-                    onPress={() => setAdjItemKey(item.itemKey)}
-                    style={[
-                      styles.pickerPill,
-                      selected && styles.pickerPillSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pickerPillText,
-                        selected && styles.pickerPillTextSelected,
-                      ]}
-                    >
-                      {item.displayName} (
-                      {formatQuantity(item.recordedQuantity, item.unitSymbol)})
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>
-                  Quantity Difference (+ or -) *
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numbers-and-punctuation"
-                  placeholder="e.g., -3 or 5"
-                  value={adjDelta}
-                  onChangeText={setAdjDelta}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Adjustment Date *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={adjDate}
-                  onChangeText={setAdjDate}
-                />
-              </View>
-            </View>
-
-            <Text style={styles.label}>Mandatory Adjustment Reason *</Text>
-            <View style={styles.chipWrap}>
-              {STOCK_ADJUSTMENT_REASONS.map((r) => {
-                const selected = adjReason === r;
-                return (
-                  <TouchableOpacity
-                    key={r}
-                    onPress={() => setAdjReason(r)}
-                    style={[
-                      styles.pickerPill,
-                      selected && styles.pickerPillSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pickerPillText,
-                        selected && styles.pickerPillTextSelected,
-                      ]}
-                    >
-                      {r}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <Text style={styles.label}>Audit Notes (Optional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Explanation for audit log..."
-              value={adjNotes}
-              onChangeText={setAdjNotes}
-            />
-
-            <PrimaryButton
-              title="Record Audited Stock Adjustment"
-              icon="sliders"
-              loading={submittingAdj}
-              onPress={handleAdjustmentSubmit}
-              style={{ marginTop: spacing.lg }}
-            />
-          </SectionCard>
-        ) : null}
-
-        {/* ================================================================
-            WORKFLOW E: IMMUTABLE STOCK EVENT LEDGER
+            TAB 3: STOCK HISTORY
            ================================================================ */}
         {activeTab === 'ledger' ? (
           <SectionCard>
             <Text style={styles.cardTitle}>
-              Immutable Stock Event Ledger ({recentEvents.length})
-            </Text>
-            <Text style={styles.cardSubtitle}>
-              Complete chronological audit trail of OPENING_STOCK, STOCK_INWARD, PHYSICAL_COUNT, and STOCK_ADJUSTMENT events
+              Recent Stock History ({recentEvents.length})
             </Text>
 
-            <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
-              {recentEvents.map((ev) => (
-                <View key={ev.id} style={styles.countItemRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.itemTitle}>{ev.displayName}</Text>
-                    <Text style={styles.itemSub}>
-                      {ev.eventType} •{' '}
-                      {formatDisplayDate(ev.eventDate, profile?.dateFormat)} •
-                      SKU: {ev.sku}
-                    </Text>
-                    {ev.varianceQuantity !== null ? (
-                      <Text style={styles.varianceBadge}>
-                        Physical Count Reconciliation Variance:{' '}
-                        {ev.varianceQuantity > 0
-                          ? `+${ev.varianceQuantity}`
-                          : ev.varianceQuantity}{' '}
-                        {ev.unitSymbol}
-                      </Text>
-                    ) : null}
-                    {ev.supplierName || ev.referenceNumber || ev.reason ? (
+            {recentEvents.length === 0 ? (
+              <EmptyStateView
+                icon="clock"
+                title="No Stock History"
+                message="Your stock additions and count updates will be listed here."
+              />
+            ) : (
+              <View style={{ gap: 8, marginTop: spacing.md }}>
+                {recentEvents.map((ev) => (
+                  <View key={ev.id} style={styles.countItemRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemTitle}>{ev.displayName}</Text>
                       <Text style={styles.itemSub}>
-                        {[ev.supplierName, ev.referenceNumber, ev.reason]
-                          .filter(Boolean)
-                          .join(' • ')}
+                        {ev.eventType === 'STOCK_INWARD'
+                          ? 'Stock Inward'
+                          : ev.eventType === 'PHYSICAL_COUNT'
+                          ? 'Count Updated'
+                          : ev.eventType === 'OPENING_STOCK'
+                          ? 'Opening Stock'
+                          : 'Adjusted'}{' '}
+                        • {formatDisplayDate(ev.eventDate, profile?.dateFormat)}
+                        {ev.referenceNumber ? ` • #${ev.referenceNumber}` : ''}
                       </Text>
-                    ) : null}
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text
+                        style={[
+                          styles.bold,
+                          ev.eventType === 'STOCK_INWARD' && {
+                            color: palette.success600,
+                          },
+                        ]}
+                      >
+                        {ev.eventType === 'STOCK_INWARD'
+                          ? `+${formatQuantity(ev.quantity, ev.unitSymbol)}`
+                          : formatQuantity(ev.quantity, ev.unitSymbol)}
+                      </Text>
+                      <Text style={styles.itemSub}>
+                        Bal: {formatQuantity(ev.resultingBalance, ev.unitSymbol)}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={styles.bold}>
-                      {ev.eventType === 'STOCK_INWARD'
-                        ? `+${formatQuantity(ev.quantity, ev.unitSymbol)}`
-                        : ev.eventType === 'PHYSICAL_COUNT'
-                        ? `Count: ${formatQuantity(ev.quantity, ev.unitSymbol)}`
-                        : formatQuantity(ev.quantity, ev.unitSymbol)}
-                    </Text>
-                    <Text style={styles.itemSub}>
-                      Bal: {formatQuantity(ev.resultingBalance, ev.unitSymbol)}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
+                ))}
+              </View>
+            )}
           </SectionCard>
         ) : null}
       </ScrollView>
@@ -1239,9 +855,19 @@ export default function StockOperationsScreen() {
               {openDropdown === 'category'
                 ? 'Select Category'
                 : openDropdown === 'product'
-                ? 'Select Product / Saree / Style'
-                : 'Select Size / Variant Type'}
+                ? 'Select Product'
+                : 'Select Size / Type'}
             </Text>
+
+            {openDropdown === 'product' && availableProducts.length > 5 ? (
+              <TextInput
+                style={[styles.input, { marginBottom: spacing.sm }]}
+                placeholder="Search product name..."
+                placeholderTextColor={palette.slate400}
+                value={dropdownSearch}
+                onChangeText={setDropdownSearch}
+              />
+            ) : null}
 
             <ScrollView style={{ maxHeight: 340 }}>
               {openDropdown === 'category' ? (
@@ -1255,13 +881,12 @@ export default function StockOperationsScreen() {
                       setFilterCategoryId(null);
                       setFilterProductId(null);
                       setFilterVariantOption(null);
-                      setCountCategoryId(null);
                       selectFirstMatchingItem(null, null, null);
                       setOpenDropdown(null);
                     }}
                   >
                     <Text style={styles.dropdownOptionText}>
-                      All Categories ({inventoryItems.length} SKUs)
+                      All Categories ({inventoryItems.length})
                     </Text>
                     {!filterCategoryId ? (
                       <Feather
@@ -1287,7 +912,6 @@ export default function StockOperationsScreen() {
                           setFilterCategoryId(cat.id);
                           setFilterProductId(null);
                           setFilterVariantOption(null);
-                          setCountCategoryId(cat.id);
                           selectFirstMatchingItem(cat.id, null, null);
                           setOpenDropdown(null);
                         }}
@@ -1310,30 +934,29 @@ export default function StockOperationsScreen() {
 
               {openDropdown === 'product' ? (
                 <>
-                  <TouchableOpacity
-                    style={[
-                      styles.dropdownOptionRow,
-                      !filterProductId && styles.dropdownOptionRowActive,
-                    ]}
-                    onPress={() => {
-                      setFilterProductId(null);
-                      setFilterVariantOption(null);
-                      selectFirstMatchingItem(filterCategoryId, null, null);
-                      setOpenDropdown(null);
-                    }}
-                  >
-                    <Text style={styles.dropdownOptionText}>
-                      All Items / Styles
-                    </Text>
-                    {!filterProductId ? (
-                      <Feather
-                        name="check"
-                        size={16}
-                        color={palette.primary600}
-                      />
-                    ) : null}
-                  </TouchableOpacity>
-                  {availableProducts.map((prod) => {
+                  {activeTab === 'count' ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.dropdownOptionRow,
+                        !filterProductId && styles.dropdownOptionRowActive,
+                      ]}
+                      onPress={() => {
+                        setFilterProductId(null);
+                        setFilterVariantOption(null);
+                        setOpenDropdown(null);
+                      }}
+                    >
+                      <Text style={styles.dropdownOptionText}>All Products</Text>
+                      {!filterProductId ? (
+                        <Feather
+                          name="check"
+                          size={16}
+                          color={palette.primary600}
+                        />
+                      ) : null}
+                    </TouchableOpacity>
+                  ) : null}
+                  {filteredProductsForModal.map((prod) => {
                     const active = filterProductId === prod.productId;
                     return (
                       <TouchableOpacity
@@ -1371,32 +994,6 @@ export default function StockOperationsScreen() {
 
               {openDropdown === 'variant' ? (
                 <>
-                  <TouchableOpacity
-                    style={[
-                      styles.dropdownOptionRow,
-                      !filterVariantOption && styles.dropdownOptionRowActive,
-                    ]}
-                    onPress={() => {
-                      setFilterVariantOption(null);
-                      selectFirstMatchingItem(
-                        filterCategoryId,
-                        filterProductId,
-                        null
-                      );
-                      setOpenDropdown(null);
-                    }}
-                  >
-                    <Text style={styles.dropdownOptionText}>
-                      All Sizes / Types
-                    </Text>
-                    {!filterVariantOption ? (
-                      <Feather
-                        name="check"
-                        size={16}
-                        color={palette.primary600}
-                      />
-                    ) : null}
-                  </TouchableOpacity>
                   {availableVariantOptions.map((opt) => {
                     const active = filterVariantOption === opt;
                     return (
@@ -1443,55 +1040,59 @@ function getStyles() {
       flex: 1,
       backgroundColor: palette.slate50,
     },
-    quickFilterCard: {
-      marginBottom: spacing.md,
-      padding: spacing.md,
+    tabBar: {
+      flexDirection: 'row',
+      backgroundColor: palette.white,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.slate200,
+      gap: 8,
     },
-    quickFilterHeader: {
-      fontSize: 12,
+    tabBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: radius.md,
+      backgroundColor: palette.slate100,
+      alignItems: 'center',
+    },
+    tabBtnActive: {
+      backgroundColor: palette.primary600,
+    },
+    tabText: {
+      fontSize: 13,
       fontWeight: '700',
       color: palette.slate700,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
     },
-    clearFilterText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: palette.primary600,
+    tabTextActive: {
+      color: '#FFFFFF',
     },
-    sortToggleChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingVertical: 4,
-      paddingHorizontal: 8,
-      borderRadius: radius.pill,
-      backgroundColor: palette.primary50,
+    scrollContent: {
+      padding: spacing.md,
+      paddingBottom: 40,
+    },
+    filterBox: {
+      backgroundColor: palette.white,
+      borderRadius: radius.md,
+      padding: spacing.sm,
       borderWidth: 1,
-      borderColor: palette.primary100,
-    },
-    sortToggleText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: palette.primary600,
+      borderColor: palette.slate200,
+      marginBottom: spacing.md,
     },
     dropdownRow: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.xs,
-      marginTop: spacing.sm,
+      gap: 6,
     },
     dropdownSelector: {
       flex: 1,
-      minWidth: 130,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: 10,
       paddingVertical: 8,
-      borderRadius: radius.md,
+      borderRadius: radius.sm,
       borderWidth: 1,
-      borderColor: palette.slate300,
+      borderColor: palette.slate200,
       backgroundColor: palette.slate50,
     },
     dropdownSelectorActive: {
@@ -1500,23 +1101,22 @@ function getStyles() {
     },
     dropdownLabel: {
       fontSize: 10,
-      fontWeight: '700',
+      fontWeight: '600',
       color: palette.slate500,
-      textTransform: 'uppercase',
     },
     dropdownValue: {
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: '700',
       color: palette.slate900,
-      marginTop: 2,
+      marginTop: 1,
     },
     sizePill: {
       paddingVertical: 6,
       paddingHorizontal: 12,
       borderRadius: radius.pill,
       borderWidth: 1,
-      borderColor: palette.slate300,
-      backgroundColor: palette.white,
+      borderColor: palette.slate200,
+      backgroundColor: palette.slate50,
     },
     sizePillActive: {
       backgroundColor: palette.primary600,
@@ -1529,6 +1129,167 @@ function getStyles() {
     },
     sizePillTextActive: {
       color: '#FFFFFF',
+    },
+    feedbackBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      marginBottom: spacing.md,
+    },
+    feedbackSuccess: {
+      backgroundColor: palette.success50,
+      borderColor: palette.success100,
+    },
+    feedbackError: {
+      backgroundColor: palette.danger50,
+      borderColor: palette.danger100,
+    },
+    feedbackText: {
+      flex: 1,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    rowBetween: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    cardTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    cardSubtitle: {
+      fontSize: 12,
+      color: palette.slate500,
+      marginTop: 2,
+    },
+    clearFilterText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.primary600,
+    },
+    previewBox: {
+      padding: spacing.md,
+      backgroundColor: palette.slate50,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+    },
+    previewTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: palette.slate900,
+    },
+    previewMeta: {
+      fontSize: 12,
+      color: palette.slate500,
+      marginTop: 2,
+    },
+    balancePreviewRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: spacing.md,
+      paddingTop: spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: palette.slate200,
+    },
+    balanceLabel: {
+      fontSize: 11,
+      color: palette.slate500,
+      fontWeight: '600',
+    },
+    balanceVal: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: palette.slate900,
+      marginTop: 2,
+    },
+    label: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: palette.slate700,
+      marginTop: spacing.md,
+      marginBottom: 4,
+    },
+    qtyLargeInput: {
+      borderWidth: 1.5,
+      borderColor: palette.primary600,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 12,
+      fontSize: 20,
+      fontWeight: '800',
+      color: palette.slate900,
+      backgroundColor: palette.white,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: palette.slate300,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 9,
+      fontSize: 14,
+      color: palette.slate900,
+      backgroundColor: palette.slate50,
+    },
+    row: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    optionalToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: spacing.md,
+      paddingVertical: 4,
+    },
+    optionalToggleText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.primary600,
+    },
+    bold: {
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    countItemRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingVertical: 10,
+      paddingHorizontal: spacing.md,
+      backgroundColor: palette.slate50,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: palette.slate200,
+    },
+    itemTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: palette.slate900,
+    },
+    itemSub: {
+      fontSize: 12,
+      color: palette.slate500,
+      marginTop: 2,
+    },
+    countInput: {
+      borderWidth: 1,
+      borderColor: palette.slate300,
+      borderRadius: radius.md,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      fontSize: 14,
+      fontWeight: '700',
+      textAlign: 'right',
+      backgroundColor: palette.white,
+      color: palette.slate900,
     },
     modalBackdrop: {
       flex: 1,
@@ -1564,197 +1325,6 @@ function getStyles() {
       fontSize: 14,
       fontWeight: '600',
       color: palette.slate900,
-    },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: palette.white,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: palette.slate200,
-    gap: 6,
-  },
-  tabBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: radius.md,
-    backgroundColor: palette.slate100,
-    alignItems: 'center',
-  },
-  tabBtnActive: {
-    backgroundColor: palette.primary600,
-  },
-  tabText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: palette.slate700,
-  },
-  tabTextActive: {
-    color: palette.white,
-  },
-  scrollContent: {
-    padding: spacing.lg,
-    paddingBottom: 40,
-  },
-  feedbackBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    marginBottom: spacing.md,
-  },
-  feedbackSuccess: {
-    backgroundColor: palette.success50,
-    borderColor: palette.success100,
-  },
-  feedbackError: {
-    backgroundColor: palette.danger50,
-    borderColor: palette.danger100,
-  },
-  feedbackText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  cardSubtitle: {
-    fontSize: 12,
-    color: palette.slate500,
-    marginTop: 2,
-  },
-  scanChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: palette.primary50,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: palette.primary100,
-  },
-  scanChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: palette.primary600,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: palette.slate700,
-    marginTop: spacing.md,
-    marginBottom: 4,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: palette.slate300,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: palette.slate900,
-    backgroundColor: palette.slate50,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  pickerPill: {
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: palette.slate300,
-    backgroundColor: palette.white,
-  },
-  pickerPillSelected: {
-    backgroundColor: palette.navy900,
-    borderColor: palette.navy900,
-  },
-  pickerPillText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: palette.slate700,
-  },
-  pickerPillTextSelected: {
-    color: palette.white,
-  },
-  previewBox: {
-    marginTop: spacing.md,
-    padding: spacing.md,
-    backgroundColor: palette.primary50,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.primary100,
-  },
-  previewTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  previewSub: {
-    fontSize: 12,
-    color: palette.slate700,
-    marginTop: 4,
-  },
-  bold: {
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  countItemRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.md,
-    backgroundColor: palette.slate50,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.slate200,
-  },
-  itemTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: palette.slate900,
-  },
-  itemSub: {
-    fontSize: 12,
-    color: palette.slate500,
-    marginTop: 2,
-  },
-  varianceBadge: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: palette.indigo700,
-    marginTop: 3,
-  },
-  countInput: {
-    borderWidth: 1,
-    borderColor: palette.primary500,
-    borderRadius: radius.md,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'right',
-    backgroundColor: palette.white,
-    color: palette.slate900,
-  },
-    chipWrap: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.xs,
     },
   });
 }
